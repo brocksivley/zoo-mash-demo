@@ -77,5 +77,19 @@ button{font-family:inherit;-webkit-appearance:none;appearance:none;cursor:pointe
   box-shadow:0 4px 0 rgba(0,0,0,.45);padding:10px 16px;font-size:15px;font-weight:700;white-space:nowrap;pointer-events:none}
 .stat.pulse{animation:pulse .3s steps(3)}
 @keyframes pulse{0%{transform:scale(1.18);color:#ffe9a8}100%{transform:scale(1)}}
+.stat.pulse-big{animation:pulse-big .55s steps(4)}
+@keyframes pulse-big{0%{transform:scale(1.5);color:#ffd75e}45%{transform:scale(1.22);color:#fff3b0}100%{transform:scale(1)}}
 .stat{transform-origin:left center}
 .stat:nth-child(2){transform-origin:center}
+#mash{position:absolute;left:50%;top:36%;z-index:6;pointer-events:none;font-family:Pix,ui-monospace,monospace;font-weight:700;
+  font-size:clamp(28px,9.2vw,46px);letter-spacing:1px;color:#ffd75e;white-space:nowrap;opacity:0;
+  text-shadow:3px 0 0 #2a190c,-3px 0 0 #2a190c,0 3px 0 #2a190c,0 -3px 0 #2a190c,0 6px 0 #6b2a14;
+  transform:translate(-50%,-50%) scale(.4)}
+#mash.on{animation:zoo-mash 1.78s linear forwards}
+@keyframes zoo-mash{
+  0%{opacity:0;transform:translate(-50%,-50%) scale(.4)}
+  6%{opacity:1;transform:translate(-50%,-50%) scale(1.14)}
+  10%{opacity:1;transform:translate(-50%,-50%) scale(1)}
+  77.5%{opacity:1;transform:translate(-50%,-50%) scale(1)}
+  100%{opacity:0;transform:translate(-50%,-50%) scale(1)}
+}

@@ -7,7 +7,7 @@
   const NAMES = ['ladybug','mouse','frog','squirrel','owl','raccoon','fox','deer','wolf','moose','bear'];
   const RFRAC = [0.0368,0.0536,0.0681,0.0770,0.0993,0.1272,0.1440,0.1741,0.1975,0.2455,0.2891];
   const POINTS = n => n * (n - 1) / 2;          // creating tier n
-  const BOSS_PAIR = 66;
+  const BOSS_PAIR = 250;                         // two tier-11 bears merge and vanish
   const DROP_POOL = [1,2,3,4,5];                 // 20% each
   // v2 feel: heavier + bouncier. Tunable in the gear menu (saved in localStorage).
   // v3 feel (matched to the QS Watermelon reference): strong gravity, low-moderate bounce, slippery animal-on-animal,
@@ -17,10 +17,13 @@
     groundFriction: 0.6, groundFrictionStatic: 0.8,           // animal-on-floor/wall: normal grip, smooth stop
     groundBounceFactor: 0.35,                                 // floor/wall bounce = bounce × this (1-2 tiny hops)
     airFriction: 0.0002 /* per 1/60 s */, angularDamping: 2.5 /* 1/s rolling resistance: rolls settle smoothly */, bigBounceCut: 0.35 /* tier 11 keeps 65% of the bounce */ };
-  const TUNE_DEF = { gravity: 34 /* m/s² @150 pt/m (v1 was 5) */, bounce: 0.3 /* animal-on-animal restitution, small tiers (v1 0.15) */, weight: 1.25 /* density × per tier (v1 1.0) */ };
+  const TUNE_DEF = { gravity: 10 /* m/s² @150 pt/m, Brock's iPhone pick (v3 was 34) */, bounce: 0.20 /* animal-on-animal restitution, small tiers */, weight: 1.10 /* density × per tier */ };
   const TUNE_RANGE = { gravity: [10, 60, 1], bounce: [0, 0.6, 0.01], weight: [1, 1.45, 0.01] };
-  const LS_TUNE = 'zoomash.forest.tune.v3' /* new key so old saved v2 values don't override the new defaults */, LS_PREFS = 'zoomash.prefs';
-  const MAX_BOX_RATIO = 1.45, DROP_VY = 1.0 /* px per 1/60 s initial push */, MIN_GAP = 0.25 /* s: about half the ~0.46 s full-height fall */;
+  const LS_TUNE = 'zoomash.forest.tune.v4' /* bumped so saved v3 sliders don't override the new defaults */, LS_PREFS = 'zoomash.prefs';
+  const MAX_BOX_RATIO = 1.45, DROP_VY = 1.0 /* px per 1/60 s initial push */;
+  // Empty-board drop-to-floor at gravity 10, measured 0.85 s (tier 1; 390×844 and 440×956 match).
+  // Cooldown is half of that fall, and scales with 1/sqrt(gravity) so it stays about half a fall as the slider moves.
+  const FALL_G10 = 0.85;
   const GRACE = 2.0, WARN = 0.5, BOX_RATIO = 1.12, SPAWN_ABOVE = 40, SCALE_IN = 0.12;
   const STEP = 1000 / 240;                       // fixed physics substep (ms): 240 Hz so fast falls never tunnel
   const SPRITE_FILL = 201 / (2 * 98.7);          // sprite png edge vs. circle outer edge
@@ -107,9 +110,11 @@
   function applyGravity() { if (L.Wi) engine.gravity.scale = tune.gravity * PHYS.ptPerM / 1e6 * (L.Wi / PHYS.refWidth); }
   function restOf(t) { return tune.bounce * (1 - PHYS.bigBounceCut * (t - 1) / 10); }
   function densOf(t) { return 0.001 * Math.pow(tune.weight, t - 1); }
+  function dropGap() { return (FALL_G10 / 2) * Math.sqrt(10 / tune.gravity); }
   function applyTune() {
     applyGravity();
     for (const b of animals) { b.restitution = restOf(b.zm.tier); Body.setDensity(b, densOf(b.zm.tier)); }
+    if (lastDropAt >= 0) canDropAt = lastDropAt + dropGap(); // slider moves: keep the wait at about half a fall
     ls.set(LS_TUNE, tune);
   }
 
@@ -145,6 +150,7 @@
   const TIER_COL = [['#d8332a','#2a1a14','#f6e7c8'],['#a7a2a6','#f2b6c0','#6d6870'],['#5fae3a','#a6d96a','#2f6a1f'],['#d9772b','#f2c27b','#7a3f17'],
     ['#9a6b3f','#e8c48a','#f2d36b'],['#7d7a78','#2b2b2b','#d9d4cf'],['#e2702a','#fff1de','#8a3a14'],['#b07a45','#f0d2a2','#5a3a1e'],
     ['#7f8ea0','#d4dbe3','#3c4652'],['#7a4e2c','#c79a62','#3f2714'],['#6b4226','#c08a55','#2b190c'],['#ffd75e','#fff3b0','#ff9f3a']];
+  const MASH_COL = ['#ffd75e','#ff5a3c','#7dff6a','#5ecbff','#ff8ad4','#fff6d0','#ff9f3a','#ffffff','#c79a62'];
   function burst(x, y, r, t) {
     fx.push({ k: 'ring', x, y, r0: r * 0.8, r1: r * 1.7, t0: now, dur: 0.32 });
     const cols = TIER_COL[t - 1], n = 10 + Math.min(14, t * 2);
@@ -153,7 +159,7 @@
       fx.push({ k: 'px', x: x + Math.cos(a) * r * 0.6, y: y + Math.sin(a) * r * 0.6, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 60,
         c: cols[i % cols.length], s: Math.random() < 0.4 ? 6 : 4, t0: now, dur: 0.35 + Math.random() * 0.25 });
     }
-    const sc = document.getElementById('score').parentNode; sc.classList.remove('pulse'); void sc.offsetWidth; sc.classList.add('pulse');
+    const sc = document.getElementById('score').parentNode; sc.classList.remove('pulse', 'pulse-big'); void sc.offsetWidth; sc.classList.add('pulse');
   }
   function drawFx(dt) {
     ctx.save(); ctx.imageSmoothingEnabled = false;
@@ -170,6 +176,25 @@
     }
     ctx.restore();
   }
+  // Tier-11 pair vanishes: big multi-colour pixel burst, "ZOO MASH!" banner, +250 popup.
+  // Does not pause the game or extend the drop cooldown. No shake, no sound.
+  function celebrateBoss(x, y, pts) {
+    const r = radius(11);
+    fx.push({ k: 'ring', x, y, r0: r * 0.35, r1: r * 2.4, t0: now, dur: 0.48 });
+    fx.push({ k: 'ring', x, y, r0: r * 0.7, r1: r * 3.3, t0: now, dur: 0.72 });
+    const n = 108;
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * Math.PI * 2 + (Math.random() - 0.5) * 0.35, sp = 180 + Math.random() * 420;
+      fx.push({ k: 'px', x: x + Math.cos(a) * r * 0.2, y: y + Math.sin(a) * r * 0.2, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 110,
+        c: MASH_COL[i % MASH_COL.length], s: i % 5 === 0 ? 8 : (i % 2 ? 6 : 4), t0: now, dur: 0.8 + Math.random() * 0.55 });
+    }
+    pops.push({ x, y, t0: now, txt: '+' + pts, boss: true });
+    const ban = $('mash');
+    ban.classList.remove('on'); void ban.offsetWidth; ban.classList.add('on');
+    const sc = elScore.parentNode;
+    sc.classList.remove('pulse', 'pulse-big'); void sc.offsetWidth; sc.classList.add('pulse-big');
+    buzz([50, 40, 80, 40, 120]);
+  }
   function applyMerges() {
     if (!mergeQ.length) return;
     const q = mergeQ; mergeQ = [];
@@ -181,24 +206,25 @@
       const vx = (va.x + vb.x) / 2, vy = (va.y + vb.y) / 2;
       removeAnimal(a); removeAnimal(b);
       let pts;
-      if (t === 11) { pts = BOSS_PAIR; pops.push({ x: mx, y: my, t0: now, txt: '+' + pts, boss: true }); burst(mx, my, radius(11) * 1.4, 11); burst(mx, my, radius(11), 12); }
+      if (t === 11) { pts = BOSS_PAIR; celebrateBoss(mx, my, pts); }
       else {
         const nt = t + 1, r = radius(nt);
         const x = Math.min(L.right - r, Math.max(L.left + r, mx)), y = Math.min(L.floorY - r, my);
         makeAnimal(nt, x, y, vx, vy, false);
         pts = POINTS(nt);
         pops.push({ x, y, t0: now, txt: '+' + pts }); burst(x, y, r, nt);
+        buzz(12);
       }
-      addScore(pts); buzz(t === 11 ? [30, 40, 30] : 12);
+      addScore(pts);
     }
   }
 
   // ---- game state ----
   let score = 0, current = 1, next = 1, aimX = 0, canDropAt = 0, gameOver = false, paused = false, now = 0, warnOn = false;
   let aiming = false, dropsTotal = 0, mergesTotal = 0, lastDrop = null, lastDropAt = -9, fallTime = 0;
-  // drop cooldown is fixed (MIN_GAP), not contact-based
+  // cooldown is half a full-height fall at the current gravity, not a fixed 0.25 s
   function isReady() {
-    return now >= canDropAt;   // fixed cooldown ≈ half a full-height fall: next animal is ready mid-fall
+    return now >= canDropAt;
   }
   const rnd = () => DROP_POOL[Math.floor(Math.random() * DROP_POOL.length)];
 
@@ -235,7 +261,7 @@
     lastDrop = makeAnimal(current, x, L.heldY, 0, DROP_VY * (L.Wi / PHYS.refWidth), true); lastDropAt = now;
     dropsTotal++;
     current = next; next = rnd(); setNextUI();
-    canDropAt = now + MIN_GAP;
+    canDropAt = now + dropGap();
     return true;
   }
 
@@ -423,11 +449,13 @@
     }
     drawFx(renderDt);
     // score pops
-    ctx.save(); ctx.textAlign = 'center'; ctx.font = '700 16px Pix, monospace';
+    ctx.save(); ctx.textAlign = 'center';
     for (let i = pops.length - 1; i >= 0; i--) {
-      const p = pops[i], a = (now - p.t0) / 0.8; if (a >= 1) { pops.splice(i, 1); continue; }
-      ctx.globalAlpha = 1 - a; ctx.fillStyle = '#000'; ctx.fillText(p.txt, p.x, p.y - 20 * a + 2);
-      ctx.fillStyle = p.boss ? '#ffd75e' : '#fff'; ctx.fillText(p.txt, p.x, p.y - 20 * a);
+      const p = pops[i], dur = p.boss ? 1.15 : 0.8, a = (now - p.t0) / dur; if (a >= 1) { pops.splice(i, 1); continue; }
+      const rise = (p.boss ? 54 : 20) * a;
+      ctx.globalAlpha = 1 - a; ctx.font = p.boss ? '700 28px Pix, monospace' : '700 16px Pix, monospace';
+      ctx.fillStyle = '#000'; ctx.fillText(p.txt, p.x, p.y - rise + 2);
+      ctx.fillStyle = p.boss ? '#ffd75e' : '#fff'; ctx.fillText(p.txt, p.x, p.y - rise);
     }
     ctx.restore();
   }
@@ -457,7 +485,7 @@
 
   // ---- test hooks (used by headless tests; harmless in play) ----
   window.ZM = {
-    get state() { return { score, best, current, next, gameOver, paused, prefs: Object.assign({}, prefs), animals: [...animals].map(b => ({ t: b.zm.tier, x: +b.position.x.toFixed(1), y: +b.position.y.toFixed(1), r: +b.zm.r.toFixed(1), fresh: b.zm.fresh })), seen: [...seen], layout: L, dropsTotal, mergesTotal, ready: isReady(), fallTime }; },
+    get state() { return { score, best, current, next, gameOver, paused, prefs: Object.assign({}, prefs), animals: [...animals].map(b => ({ t: b.zm.tier, x: +b.position.x.toFixed(1), y: +b.position.y.toFixed(1), r: +b.zm.r.toFixed(1), fresh: b.zm.fresh })), seen: [...seen], layout: L, dropsTotal, mergesTotal, ready: isReady(), fallTime, cooldown: dropGap(), pops: pops.map(p => p.txt) }; },
     setCurrent(t) { current = t; }, setNext(t) { next = t; setNextUI(); },
     dropAt(xFrac) { aimX = L.left + xFrac * L.Wi; return drop(); },
     spawn(t, xFrac, yPx) { return !!makeAnimal(t, L.left + xFrac * L.Wi, yPx, 0, 0, false); },
