@@ -3,10 +3,10 @@
 Zoo Mash: a phone-first web demo, served by GitHub Pages at https://brocksivley.github.io/zoo-mash-demo/.
 
 ## What's in it
-- **Title**: the zoo gate, a menu (Play / Zoopedia / Scores / Settings), and the gear in the top-right corner.
+- **Title**: the zoo gate, a menu (Play / Zoopedia / Scores / Settings), with Settings as a menu item (no corner gear on the title).
 - **Biome map**: 8 islands along a winding cliff path. Forest is playable and the other 7 are locked.
 - **Forest level**: the drop-and-merge game, with 11 tiers from ladybug to bear.
-- **Zoopedia**: a book with one spread per biome covering all 88 animals, each with a fun fact. An animal is recorded as found once it appears in gameplay.
+- **Zoopedia**: a pixel-art hardcover book with one two-page spread per biome (11 animals each, 88 total). Turn pages with the arrows, the dog-eared page corners, a swipe, or the arrow keys; biome bookmark tabs jump to a spread. Tap a found animal for its fun-fact page. An animal is recorded as found once it appears in gameplay.
 - **Scores**: your best score for each biome.
 - **Settings** has a demo-only "Unlock all (demo)" toggle that marks every Zoopedia animal as found.
 
