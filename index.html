@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, minimum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Zoo Mash">
+<meta name="format-detection" content="telephone=no">
+<meta name="theme-color" content="#1d2a17">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="manifest" href="manifest.webmanifest">
+<title>Zoo Mash · Forest</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+  <div id="bg"></div>
+  <canvas id="game"></canvas>
+  <div id="topbar">
+    <div class="stat">SCORE <span id="score">0</span></div>
+    <div class="stat">BEST <span id="best">0</span></div>
+    <button id="gear" aria-label="Settings">
+      <svg viewBox="0 0 24 24"><g fill="currentColor"><rect x="10" y="1" width="4" height="6" transform="rotate(0 12 12)"/><rect x="10" y="1" width="4" height="6" transform="rotate(45 12 12)"/><rect x="10" y="1" width="4" height="6" transform="rotate(90 12 12)"/><rect x="10" y="1" width="4" height="6" transform="rotate(135 12 12)"/><rect x="10" y="1" width="4" height="6" transform="rotate(180 12 12)"/><rect x="10" y="1" width="4" height="6" transform="rotate(225 12 12)"/><rect x="10" y="1" width="4" height="6" transform="rotate(270 12 12)"/><rect x="10" y="1" width="4" height="6" transform="rotate(315 12 12)"/><circle cx="12" cy="12" r="7.5"/></g><circle cx="12" cy="12" r="3.2" fill="#121610"/></svg>
+    </button>
+  </div>
+  <div id="menu" class="hidden">
+    <button id="m-restart">RESTART</button>
+    <button id="m-close">CLOSE</button>
+  </div>
+  <div id="next"><div class="lbl">NEXT</div><img id="next-img" alt=""></div>
+  <div id="strip"><div id="slots"></div></div>
+  <div id="over" class="hidden">
+    <div class="panel">
+      <div class="title">GAME OVER</div>
+      <div class="row">SCORE <b id="o-score">0</b></div>
+      <div class="row">BEST <b id="o-best">0</b></div>
+      <div class="newbest hidden" id="o-new">NEW BEST!</div>
+      <button id="again">PLAY AGAIN</button>
+    </div>
+  </div>
+  <div id="rotate">Turn your phone upright to play</div>
+</div>
+<script src="matter.min.js"></script>
+<script src="game.js"></script>
+</body>
+</html>
