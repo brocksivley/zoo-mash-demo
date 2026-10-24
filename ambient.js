@@ -234,7 +234,7 @@
         const tt = step(4);
         for (let i = 0; i < 28; i++) {
           const x = Math.round(24 + fr(i) * 194), y = Math.round(30 + fr(i + 33) * 130);
-          if ((x > 18 && x < 128 && y > 50 && y < 120) || (x > 168 && x < 204 && y > 112 && y < 144)) continue;
+          if (x > 35 && x < 57 && y > 115 && y < 137) continue; // v7: planets removed; only the small moon is skipped
           const a = Math.max(0, Math.sin(tt * (1 + fr(i + 5) * 1.5) + i * 2.3)), lv = a > 0.75 ? 2 : a > 0.3 ? 1 : 0;
           if (!lv) continue;
           px(x, y, 1, 1, lv === 2 ? '#ffffff' : '#8fa6c8');
@@ -243,7 +243,7 @@
       } },
       { name: 'comet', fps: 12, draw() { // a shooting star now and then: opaque head + stepped colour trail, moving at 12 fps
         const tt = step(12), p = event(14, 1.3, 3, tt); if (p < 0) return;
-        const n = cycleNo(14, 3, tt), sx = 150 + fr(n) * 60, sy = 30 + fr(n + 9) * 20, ex = sx - 120, ey = sy + 70;
+        const n = cycleNo(14, 3, tt), sx = 150 + fr(n) * 60, sy = 30 + fr(n + 9) * 20, ex = sx - 120, ey = sy + 60; // v7: ends above the moon
         const x = Math.round(sx + (ex - sx) * p), y = Math.round(sy + (ey - sy) * p), len = p > 0.8 ? 6 : 12;
         g.save(); g.beginPath(); [[36, 24], [204, 24], [222, 42], [222, 150], [206, 166], [36, 166], [18, 150], [18, 42]].forEach(([a, b], i) => i ? g.lineTo(a, b) : g.moveTo(a, b)); g.clip();
         const TR = ['#ffffff', '#ffffff', '#d2f6ff', '#9fe8ff', '#9fe8ff', '#5fb8e8', '#5fb8e8', '#3a78b8', '#3a78b8', '#2a4f8a', '#2a4f8a', '#22386a'];
