@@ -1,6 +1,7 @@
 @font-face{font-family:Pix;src:url(fonts/Silkscreen-Regular.ttf) format("truetype");font-weight:400;font-display:block}
 @font-face{font-family:Pix;src:url(fonts/Silkscreen-Bold.ttf) format("truetype");font-weight:700;font-display:block}
 :root{--st:env(safe-area-inset-top,0px);--sb:env(safe-area-inset-bottom,0px)}
+html{background:#1d2a17}
 html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;position:fixed;inset:0;background:#1d2a17;
   overscroll-behavior:none;touch-action:none;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;
   -webkit-tap-highlight-color:transparent;-webkit-text-size-adjust:100%}
@@ -12,21 +13,25 @@ html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;position:fix
 canvas#game{position:absolute;left:0;top:0;display:block;touch-action:none}
 img{image-rendering:pixelated;-webkit-user-drag:none;pointer-events:none}
 button{font-family:inherit;-webkit-appearance:none;appearance:none;cursor:pointer}
+/* v6: no top bar - the scene runs to the top edge; score, NEXT, best and the buttons float over it with a hard 2px
+   pixel outline so they read on bright skies (Farm) and dark ones (Space) alike */
 #topbar{position:absolute;left:0;right:0;top:0;padding-top:var(--st);height:calc(44px + var(--st));display:flex;align-items:center;
-  gap:10px;padding-left:14px;padding-right:6px;background:rgba(18,22,16,.88);border-bottom:2px solid #0c0f0a;z-index:5;
-  text-shadow:0 2px 0 #000}
-.stat{font-size:16px;letter-spacing:.5px;white-space:nowrap;flex:1}
-.stat:nth-child(2){text-align:center}
+  gap:6px;padding-left:10px;padding-right:4px;background:none;border:0;z-index:5;pointer-events:none;
+  text-shadow:-2px 0 #000,2px 0 #000,0 -2px #000,0 2px #000,-2px -2px #000,2px -2px #000,-2px 2px #000,2px 2px #000,0 4px 0 rgba(0,0,0,.45)}
+#topbar>*{pointer-events:auto}
+.stat{font-size:15px;letter-spacing:.5px;white-space:nowrap;flex:1 1 0;min-width:0}
+.stat:nth-child(3){text-align:right;padding-right:4px}
 .iconbtn{flex:0 0 auto;width:40px;height:40px;border:0;background:transparent;color:#d9d9d9;padding:9px}
-.iconbtn svg{width:22px;height:22px;display:block;filter:drop-shadow(0 2px 0 #000)}
-#pause{margin-left:auto}
+.iconbtn svg{width:22px;height:22px;display:block;filter:drop-shadow(2px 0 0 #000) drop-shadow(-2px 0 0 #000) drop-shadow(0 2px 0 #000) drop-shadow(0 -2px 0 #000)}
+#pause{margin-left:0}
 .modal button,#again{font-size:15px;font-weight:700;color:#fff;background:#6c9a35;border:3px solid #2c4414;box-shadow:0 3px 0 #2c4414;
   padding:8px 10px;text-shadow:0 2px 0 #2c4414}
 .hidden{display:none!important}
-#next{position:absolute;left:8px;top:calc(52px + var(--st));z-index:4;width:54px;padding:3px 0 5px;background:rgba(140,170,90,.88);
-  border:2px solid #2d3d1c;border-radius:6px;text-align:center;box-shadow:0 3px 0 rgba(0,0,0,.35)}
-#next .lbl{font-size:11px;font-weight:700;color:#1c2610;letter-spacing:.5px}
-#next img{width:38px;height:38px;display:block;margin:1px auto 0;image-rendering:auto}
+/* NEXT: a compact badge in the HUD row (above the held piece), never inside the drop zone */
+#next{position:relative;flex:0 0 auto;display:flex;align-items:center;gap:3px;height:36px;padding:0 4px 0 6px;background:rgba(140,170,90,.92);
+  border:2px solid #000;box-shadow:0 0 0 2px rgba(255,255,255,.18) inset,2px 2px 0 rgba(0,0,0,.45);text-shadow:none}
+#next .lbl{font-size:10px;font-weight:700;color:#1c2610;letter-spacing:0;line-height:1}
+#next img{width:30px;height:30px;display:block;margin:0;image-rendering:auto}
 #strip{position:absolute;left:0;right:0;bottom:0;z-index:4;padding:8px 6px calc(8px + var(--sb));
   background:repeating-linear-gradient(180deg,#7a4e2b 0 9px,#6b4325 9px 11px,#83552f 11px 20px,#6b4325 20px 22px);
   border-top:4px solid #3b2413;box-shadow:0 -3px 0 #a26c3d inset, 0 -2px 0 #2b190c}
@@ -95,3 +100,26 @@ button{font-family:inherit;-webkit-appearance:none;appearance:none;cursor:pointe
   77.5%{opacity:1;transform:translate(-50%,-50%) scale(1)}
   100%{opacity:0;transform:translate(-50%,-50%) scale(1)}
 }
+
+/* v6: combo pop (pixel font, stepped), NEW ANIMAL card */
+#combo{position:absolute;left:50%;top:calc(var(--st) + 27%);z-index:6;pointer-events:none;font-family:Pix,ui-monospace,monospace;font-weight:700;
+  text-align:center;white-space:nowrap;opacity:0;transform:translate(-50%,-50%)}
+#combo b{display:block;font-size:clamp(20px,6.4vw,30px);color:#fff3b0;letter-spacing:1px;
+  text-shadow:2px 0 0 #2a190c,-2px 0 0 #2a190c,0 2px 0 #2a190c,0 -2px 0 #2a190c,0 4px 0 #6b2a14}
+#combo i{display:block;font-style:normal;font-size:clamp(13px,4vw,18px);color:#9fe36b;margin-top:2px;
+  text-shadow:2px 0 0 #2a190c,-2px 0 0 #2a190c,0 2px 0 #2a190c,0 -2px 0 #2a190c}
+#combo.hot b{color:#ff9f3a}
+#combo.on{animation:combo-pop .9s steps(9) forwards}
+@keyframes combo-pop{0%{opacity:1;transform:translate(-50%,-50%) scale(.5)}12%{opacity:1;transform:translate(-50%,-50%) scale(1.2)}
+  24%{opacity:1;transform:translate(-50%,-56%) scale(1)}80%{opacity:1;transform:translate(-50%,-70%) scale(1)}100%{opacity:0;transform:translate(-50%,-78%) scale(1)}}
+#newcard{position:absolute;left:50%;top:calc(var(--st) + 82px);z-index:7;transform:translateX(-50%);min-width:220px;max-width:88vw;
+  background:#f4e5c3;border:3px solid #2a190c;box-shadow:0 0 0 3px #a26c3d inset,0 0 0 6px #f4e5c3 inset,4px 4px 0 rgba(0,0,0,.4);
+  padding:9px 14px 10px;font-family:Pix,ui-monospace,monospace;font-weight:700;color:#3b2413;cursor:pointer;image-rendering:pixelated}
+#newcard.on{animation:nc-in .24s steps(3) both}
+@keyframes nc-in{0%{transform:translateX(-50%) translateY(-18px) scale(.7);opacity:0}100%{transform:translateX(-50%) translateY(0) scale(1);opacity:1}}
+#newcard .nc-h{font-size:17px;color:#d8332a;text-align:center;letter-spacing:1px;text-shadow:0 2px 0 #fff3b0;margin-bottom:6px}
+#newcard .nc-row{display:flex;align-items:center;gap:12px}
+#newcard .nc-b{width:58px;height:58px;flex:none;background:#e8d3a6;border:3px solid #2a190c;box-shadow:0 0 0 2px #fff6dc inset;display:flex;align-items:center;justify-content:center}
+#newcard .nc-b img{width:50px;height:50px;image-rendering:auto}
+#newcard .nc-no{font-size:12px;color:#8a5a32}
+#newcard .nc-name{font-size:19px;line-height:1.05;color:#2a190c}

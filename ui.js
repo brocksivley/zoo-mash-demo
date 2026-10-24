@@ -11,17 +11,22 @@
   const lsKey = (b, k) => 'zoomash.' + D[b].key + '.' + k;          // same keys game.js uses (forest = the v4 keys)
   const dprOf = () => Math.min(3, window.devicePixelRatio || 1);
   let W = innerWidth, H = innerHeight, u = 1, dpr = dprOf(), st = 0, sb = 0;
-  function measure() {
-    W = innerWidth; H = innerHeight; dpr = dprOf(); u = Math.min(W / 440, H / 956);
+  function measure() {   // v6: size from the fixed screen box, not innerHeight (iOS 26 Safari runs the page under its toolbar; see vp.js)
+    const v = (window.ZMVP.last = window.ZMVP.measure());
+    W = v.W; H = v.H; st = v.st; sb = v.sb; dpr = dprOf(); u = Math.min(W / 440, H / 956);
     document.documentElement.style.fontSize = (10 * u) + 'px';
-    const p = document.createElement('div');
-    p.style.cssText = 'position:fixed;left:0;top:0;visibility:hidden;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)';
-    document.body.appendChild(p); const cs = getComputedStyle(p); st = parseFloat(cs.paddingTop) || 0; sb = parseFloat(cs.paddingBottom) || 0; p.remove();
   }
   measure();
   const img = src => { const im = new Image(); im.src = src; return im; };
   const ready = im => im.complete && im.naturalWidth > 0;
   const SIGN = D.map(b => 'img/sign-' + b.key + '.png');
+  // v6: warm every Zoopedia image (88 animal arts + 8 signs) shortly after boot and decode them, so the book never trickles in
+  const signIms = [];
+  let preloadDone = false;
+  const preloadAll = new Promise(r => setTimeout(r, 60)).then(() => Promise.all([
+    ...D.flatMap((x, b) => Array.from({ length: 11 }, (y, i) => Art.load(b, i + 1).catch(() => {}))),
+    ...SIGN.map(u => { const im = new Image(); im.src = u; signIms.push(im); return im.decode ? im.decode().catch(() => {}) : new Promise(z => { im.onload = im.onerror = z; }); })
+  ])).then(() => { preloadDone = true; });
   const LOCK_SVG = '<svg class="lockico" viewBox="0 0 12 14" shape-rendering="crispEdges"><g fill="#26292c"><rect x="3" y="0" width="6" height="2"/><rect x="2" y="1" width="2" height="6"/><rect x="8" y="1" width="2" height="6"/><rect x="0" y="6" width="12" height="8"/></g><rect x="1" y="7" width="10" height="6" fill="#e3e5e7"/><rect x="1" y="11" width="10" height="2" fill="#b4b8bc"/><rect x="5" y="8" width="2" height="3" fill="#26292c"/></svg>';
 
   // ---------- found / unlock state ----------
@@ -75,7 +80,7 @@
     requestAnimationFrame(loop);                       // schedule first so one bad frame can never stop the loop
     const s = Math.max(0, (t - t0) / 1000);            // the first rAF stamp can precede t0 (negative time broke the bird frame)
     const dt = Math.min(0.1, Math.max(0, s - lastS)); lastS = s;
-    if (cur === 'title') { if (!document.hidden) TA.clock += dt; titleTick(); drawTitle(s); }
+    if (cur === 'title') { if (!document.hidden && !TA.hold) TA.clock += dt; titleTick(); drawTitle(s); }
     else if (cur === 'map') drawIslands(s);
   }
 
@@ -162,7 +167,7 @@
   // up again after ~1.5 s (taps ignored meanwhile). Bear: waves 5 s after the app opens, then every 15 s while the title is
   // shown. Monkey: a tap raises a banana over his head and lowers it (~1.5 s; taps ignored while it plays). TA.clock only runs
   // while the title is visible, so nothing jumps when you come back to it.
-  const penIm = img('img/title-penguin.png'), penPlate = img('img/title-penguin-plate.png'), bearArm = img('img/title-bear-arm.png'), monkArm = img('img/title-monkey-banana.png');
+  const penPlate = img('img/title-penguin-plate.png');
   const HIT = { penguin: [484, 655, 92, 140], bear: [604, 494, 116, 160], monkey: [30, 552, 96, 100] };
   const PEN = { x: 486, y: 660, w: 88, h: 130, foot: [531, 783], heel: [566, 783], plate: [482, 656] };
   const WADDLE = 0.6, FALL = { tip: 0.45, bounce: 0.35, lie: 1.5, up: 0.5 }, FALL_T = 2.8, BEAR_FIRST = 5, BEAR_EVERY = 15, BEAR_DUR = 1.5, MONK_DUR = 1.5;
@@ -194,47 +199,63 @@
     if (cur !== 'title') return; const k = hitAt(e.clientX, e.clientY);
     if (k === 'penguin') tapPenguin(); else if (k === 'monkey') tapMonkey();
   });
-  const ease = q => q < 0 ? 0 : q > 1 ? 1 : q * q * (3 - 2 * q);
-  function penPose() {                                    // {ang, piv:[x,y], dx, dy} of the penguin sprite, or null at rest
-    const p = TA.pen, e = TA.clock - p.t0;
-    if (p.mode === 'waddle') { const q = e / WADDLE; return { ang: Math.sin(q * Math.PI * 4) * 0.11 * (1 - q * 0.4), piv: PEN.foot, dx: Math.round(Math.sin(q * Math.PI * 2) * 3), dy: -Math.round(Math.abs(Math.sin(q * Math.PI * 4)) * 2) }; }
-    if (p.mode === 'fall') {
-      const A = 1.75, f = FALL; let ang, dy = 0;
-      if (e < f.tip) { const q = e / f.tip; ang = A * q * q; }
-      else if (e < f.tip + f.bounce) { const q = (e - f.tip) / f.bounce; dy = -Math.round(Math.sin(Math.PI * q) * 9); ang = A - 0.16 * Math.sin(Math.PI * q); }
-      else if (e < f.tip + f.bounce + f.lie) { const q = (e - f.tip - f.bounce) / f.lie; ang = A + Math.sin(q * Math.PI * 6) * 0.03 * (1 - q); }
-      else { const q = ease((e - f.tip - f.bounce - f.lie) / f.up); ang = A * (1 - q); dy = -Math.round(Math.sin(Math.PI * q) * 6); }
-      return { ang, piv: PEN.heel, dx: 0, dy };
+  // v6: every critter move is a drawn pixel frame; nothing is rotated, skewed or scaled at draw time, positions are whole
+  // source px and frames step at 6-8 fps. Bear + monkey frames are opaque patches of the backdrop region they cover (the
+  // critter redrawn inside it: the bear's own arm, the monkey's own arm/banana/grin), drawn 1:1 over the backdrop
+  // (tools/title_patches_v6.py). Penguin frames are drawn poses on a 3-px cell (tools/title_penguin_v6.py).
+  const penSheet = img('img/title-penguin-v6.png?v=fd6'), bearSheet = img('img/title-bear-v6.png?v=fd6'), monkSheet = img('img/title-monkey-v6.png?v=fd7');
+  const PENF = { fw: 240, fh: 156, at: [90, 138], idx: { idle: 0, wl: 1, wr: 2, flail: 3, fall: 4, lie: 5, lie2: 6, lie3: 7 } };
+  const BEARF = { w: 170, h: 170, x: 550, y: 480, idx: { mid: 0, up: 1, tiltL: 2, tiltR: 3 } };
+  const MONKF = { w: 120, h: 120, x: 30, y: 520, idx: { low: 0, mid: 1, up: 2, up2: 3 } };
+  // penguin sequences: [frame, dx, dy] per step
+  const WAD_SEQ = [['wl', 0, -3], ['wr', 3, 0], ['wl', 3, -3], ['wr', 0, 0], ['idle', 0, 0]];       // 8 fps, 0.6 s
+  const TIP_SEQ = [['flail', 0, -3], ['fall', 3, -9], ['fall', 3, -3], ['lie', 0, 0]];                // 8 fps, 0.45 s
+  const BNC_SEQ = [['lie', 0, -6], ['lie', 0, -3], ['lie', 0, 0]];                                   // 8 fps, 0.35 s
+  const UP_SEQ = [['fall', 3, -6], ['flail', 0, -6], ['flail', 0, 0], ['idle', 0, 0]];                // 8 fps, 0.5 s
+  const stepAt = (seq, e, fps) => seq[Math.max(0, Math.min(seq.length - 1, Math.floor(e * fps)))];
+  function penPose() {                     // {frame, dx, dy} while animating, or null at rest
+    const p = TA.pen, e = TA.clock - p.t0; let st = null;
+    if (p.mode === 'waddle') st = stepAt(WAD_SEQ, e, 8);
+    else if (p.mode === 'fall') {
+      const f = FALL;
+      if (e < f.tip) st = stepAt(TIP_SEQ, e, 8);
+      else if (e < f.tip + f.bounce) st = stepAt(BNC_SEQ, e - f.tip, 8);
+      else if (e < f.tip + f.bounce + f.lie) {         // lying feet-up: little kicks at 6 fps that settle down
+        const k = Math.floor((e - f.tip - f.bounce) * 6), kick = k < 6 ? ['lie2', 'lie3'][k % 2] : k % 3 === 0 && k < 8 ? 'lie3' : 'lie';
+        st = [kick, 0, 0];
+      } else st = stepAt(UP_SEQ, e - f.tip - f.bounce - f.lie, 8);
     }
-    return null;
+    if (!st) return null;
+    return { frame: st[0], dx: st[1], dy: st[2] };
+  }
+  // bear: his own arm, redrawn per frame: half up -> up -> paw tilted left -> up -> paw tilted right ... -> half up (6 fps)
+  const BEAR_SEQ = ['mid', 'up', 'tiltL', 'up', 'tiltR', 'up', 'tiltL', 'up', 'mid'];
+  function bearPose() {                     // {frame, step} or null
+    const b = TA.bear; if (!b.wave) return null;
+    const k = Math.floor((TA.clock - b.t0) * 6);
+    return k < BEAR_SEQ.length ? { frame: BEAR_SEQ[k], step: k } : null;
+  }
+  // monkey: arm comes up from behind the TICKETS sign (8 fps), bobs the banana with a grin (6 fps), goes back down (8 fps)
+  function monkPose() {                     // {frame} or null
+    const m = TA.monk; if (m.mode !== 'up') return null;
+    const e = TA.clock - m.t0, up = 3 / 8, down = MONK_DUR - 3 / 8;
+    if (e < up) return { frame: ['low', 'mid', 'up'][Math.floor(e * 8)] };
+    if (e < down) return { frame: ['up', 'up2'][Math.floor((e - up) * 6) % 2] };
+    const k = Math.floor((e - down) * 8); return k < 3 ? { frame: ['up', 'mid', 'low'][k] } : null;
   }
   function drawCritters(g) {
     if (!tl) return;
-    g.save(); g.setTransform(dpr * tl.s, 0, 0, dpr * tl.s, dpr * tl.x0, 0); g.imageSmoothingEnabled = true; g.imageSmoothingQuality = 'high';
-    // monkey: banana arm slides up from behind the TICKETS sign (clipped at the sign top), shaft stretches down to it
-    const m = TA.monk;
-    if (m.mode === 'up' && ready(monkArm)) {
-      const q = (TA.clock - m.t0) / MONK_DUR, r = q < 0.25 ? ease(q / 0.25) : q < 0.72 ? 1 : ease((1 - q) / 0.28);
-      const top = Math.round(621 - r * 85), wig = q > 0.25 && q < 0.72 ? Math.round(Math.sin((q - 0.25) * Math.PI * 6) * 2) : 0, x = 96 + wig;
-      g.save(); g.beginPath(); g.rect(80, 400, 70, 219); g.clip();
-      g.drawImage(monkArm, x, top);
-      if (top + 58 < 619) g.drawImage(monkArm, 0, 57, 30, 1, x, top + 57.5, 30, 619 - (top + 57.5) + 1);
-      g.restore();
-    }
-    // bear: the free paw rises from his shoulder and waves side to side
-    const b = TA.bear;
-    if (b.wave && ready(bearArm)) {
-      const q = (TA.clock - b.t0) / BEAR_DUR, env = Math.min(1, q / 0.16, (1 - q) / 0.16);
-      g.save(); g.beginPath(); g.rect(560, 380, 120, 238); g.clip();
-      g.translate(612, 618 + Math.round((1 - env) * 46)); g.rotate(Math.sin(q * Math.PI * 2 * 2.5) * 0.38 * env);
-      g.drawImage(bearArm, -11, -46); g.restore();
-    }
-    // penguin: while animating, the patch over his painted body is drawn first, then the sprite
+    g.save(); g.setTransform(dpr * tl.s, 0, 0, dpr * tl.s, dpr * tl.x0, 0); g.imageSmoothingEnabled = false;
+    const mp = monkPose();
+    if (mp && ready(monkSheet)) g.drawImage(monkSheet, MONKF.idx[mp.frame] * MONKF.w, 0, MONKF.w, MONKF.h, MONKF.x, MONKF.y, MONKF.w, MONKF.h);
+    const bp = bearPose();
+    if (bp && ready(bearSheet)) g.drawImage(bearSheet, BEARF.idx[bp.frame] * BEARF.w, 0, BEARF.w, BEARF.h, BEARF.x, BEARF.y, BEARF.w, BEARF.h);
+    // penguin: while animating, the patch over his painted body is drawn first, then the pose frame
     const pp = penPose();
-    if (pp && ready(penIm) && ready(penPlate)) {
+    if (pp && ready(penSheet) && ready(penPlate)) {
       g.drawImage(penPlate, PEN.plate[0], PEN.plate[1]);
-      g.save(); g.translate(pp.piv[0] + pp.dx, pp.piv[1] + pp.dy); g.rotate(pp.ang);
-      g.drawImage(penIm, PEN.x - pp.piv[0], PEN.y - pp.piv[1]); g.restore();
+      const i = PENF.idx[pp.frame];
+      g.drawImage(penSheet, i * PENF.fw, 0, PENF.fw, PENF.fh, PEN.heel[0] - PENF.at[0] + pp.dx, PEN.heel[1] - PENF.at[1] + pp.dy, PENF.fw, PENF.fh);
     }
     g.restore();
   }
@@ -483,16 +504,17 @@
   }
   document.documentElement.style.setProperty('--parch', tex(7, '#f4e5c3', [['#efdcb3', 260, 2], ['#f8ecd0', 160, 2], ['#e6d0a2', 60, 1], ['#dcc391', 14, 1]]));
   document.documentElement.style.setProperty('--leather', tex(11, '#6a2c16', [['#5e2612', 300, 2], ['#773419', 220, 2], ['#4e1e0c', 70, 1], ['#86401f', 30, 1]]));
-  // biome bookmark tabs: colour + a tiny pixel glyph each
+  // biome bookmark tabs (v6): themed cloth colour + a 9x9 multicolour pixel emblem each (auto dark outline); letters map to the
+  // emblem palette, '.' is empty
   const TAB = {
-    forest: ['#3f8a2e', ['...X...', '..XXX..', '.XXXXX.', '..XXX..', '.XXXXX.', 'XXXXXXX', '...X...']],
-    ocean: ['#2f7fc6', ['.......', '.XX....', 'X..X..X', '....XX.', '.XX....', 'X..X..X', '....XX.']],
-    farm: ['#c99a2e', ['...X...', '..XXX..', '.XXXXX.', 'XX...XX', '.X.X.X.', '.X...X.', '.XXXXX.']],
-    arctic: ['#5fb2d9', ['X..X..X', '.X.X.X.', '..XXX..', 'XXXXXXX', '..XXX..', '.X.X.X.', 'X..X..X']],
-    oriental: ['#c4362e', ['..XXX..', '.XXXXX.', 'XX.X.XX', 'XX.X.XX', 'XX.X.XX', '.XXXXX.', '...X...']],
-    savannah: ['#df8a2a', ['XXXXXXX', '.XXXXX.', '...X...', '...X...', '...X...', '..XXX..', '.......']],
-    dinosaurs: ['#5f8a2a', ['X..X..X', 'X..X..X', '.X.X.X.', '..XXX..', '.XXXXX.', '.XXXXX.', '..XXX..']],
-    space: ['#46379a', ['...X...', '...X...', 'XXXXXXX', '.XXXXX.', '..XXX..', '.XX.XX.', 'X.....X']],
+    forest: ['#3f8a2e', ['...ggg...', '..gggGg..', '.ggggGGg.', '.gggGGGg.', 'ggggGGGGg', '.gGGGGGg.', '...bbb...', '...bbb...', '..bbbbb..'], { g: '#9fd46a', G: '#4f9a34', b: '#7a4a24' }],
+    ocean: ['#1f8f98', ['.........', '..wwww..w', '.wwwwwwww', 'wkwwwwwww', 'wwwwwwwww', '.bbbbbb.b', '..bbbb...', '.........', 'c.cc.cc.c'], { w: '#ffd36b', b: '#ff9a3c', k: '#1a1010', c: '#bff4ee' }],
+    farm: ['#c99a2e', ['....r....', '...rrr...', '..rrrrr..', '.rrrrrrr.', 'wwwwwwwww', '.rwwwwwr.', '.rwkkkwr.', '.rwkwkwr.', '.rrkkkrr.'], { r: '#d8402e', w: '#fff6e4', k: '#5a1a10' }],
+    arctic: ['#3f8fc4', ['....w....', '.w..w..w.', '..w.w.w..', '...ccc...', 'wwwcwcwww', '...ccc...', '..w.w.w..', '.w..w..w.', '....w....'], { w: '#ffffff', c: '#bfe8ff' }],
+    oriental: ['#c4362e', ['....y....', '...yyy...', '..rrrrr..', '.rrryrrr.', '.rryyyrr.', '.rrryrrr.', '..rrrrr..', '...yyy...', '....y....'], { y: '#ffd24a', r: '#ff5a3c' }],
+    savannah: ['#df8a2a', ['...yyy...', '.........', 'GGGgggGGG', '.gggggggg', '..g.b.g..', '....b....', '....b....', '...bbb...', 'yyyyyyyyy'], { G: '#3f6a1e', g: '#6e9a2c', b: '#5a3214', y: '#ffe08a' }],
+    dinosaurs: ['#5a4a42', ['y...y...y', 'oy..y..yo', '.oy.y.yo.', '..yyyyy..', '.yyyyyyy.', '.yyyyyyy.', '..yyyyy..', '...yyy...', '.........'], { y: '#ff8a2a', o: '#ffd08a' }],
+    space: ['#2c2f7a', ['....w....', '...www...', '...wcw...', '...www...', '..rwwwr..', '.rrwwwrr.', '.r.yfy.r.', '....f....', '.........'], { w: '#f4f6ff', c: '#33e1ff', r: '#ff4a4a', y: '#ffd24a', f: '#ff8a2a' }],
   };
   const tabCol = b => (TAB[D[b].key] || ['#8a5a2a'])[0];
   function buildTabs() {
@@ -518,7 +540,7 @@
     const P = BK.P, cw0 = Math.max(40, Math.floor(Wc / P)), cw = o.single ? cw0 : cw0 - (1 - cw0 % 2), ch = Math.max(40, Math.floor(Hc / P));
     cv.width = cw; cv.height = ch; cv.style.width = cw * P + 'px'; cv.style.height = ch * P + 'px';
     const g = cv.getContext('2d'), im = g.createImageData(cw, ch), d = im.data;
-    const single = !!o.single, tabH = o.tabs ? 15 : 0, rb = o.ribbon ? 10 : 0, SHX = 2, SHY = 3;
+    const single = !!o.single, tabH = o.tabs ? 22 : 0, rb = o.ribbon ? 10 : 0, SHX = 2, SHY = 3;
     const X0 = 0, Y0 = tabH, X1 = cw - SHX - 1, Y1 = ch - Math.max(SHY + 2, rb), RAD = 4, TH = 3, K = 5;
     const bx0 = X0 + (single ? 10 : 6), bx1 = X1 - 6, by0 = Y0 + 5, by1 = Y1 - TH - 4;
     const cx = single ? bx0 : Math.round((bx0 + bx1) / 2);
@@ -563,28 +585,35 @@
     // --- 2. cloth divider tabs (between cover and pages, so the pages cover their roots); the open one is drawn on an overlay
     const tabRects = [], tabX = [];
     const paintTab = (pt, i, on, lim) => {
-      const tb = o.tabs[i], [tx0, tx1] = tabX[i], ty0 = on ? 0 : 3, ty1 = by0 + 6;
-      const [cr, cg, cb] = hexRGB(tb.col), dim = on ? 1.04 : .8, tw = tx1 - tx0;
+      // inactive tabs sit lower and dimmer; the open tab stands 6 px taller, brighter, with a lit rim and a cream top stitch
+      const tb = o.tabs[i], [tx0, tx1] = tabX[i], ty0 = on ? 0 : 6, ty1 = by0 + 6;
+      const [cr, cg, cb] = hexRGB(tb.col), dim = on ? 1.1 : .74, tw = tx1 - tx0;
       for (let y = ty0; y < ty1; y++) for (let x = tx0; x < tx1; x++) {
         if (lim && y >= lim[x]) continue;
         if (!inRR(x, y, tx0, ty0, tx1, ty1 + 4, 2)) continue;
         const ed = !inRR(x - 1, y, tx0, ty0, tx1, ty1 + 4, 2) || !inRR(x + 1, y, tx0, ty0, tx1, ty1 + 4, 2) || !inRR(x, y - 1, tx0, ty0, tx1, ty1 + 4, 2);
-        if (ed) { pt(x, y, 36, 20, 10); continue; }
+        if (ed) { if (on) pt(x, y, 24, 12, 4); else pt(x, y, 36, 20, 10); continue; }
         let k = dim * (y % 2 ? .93 : 1) * ((x + (y >> 1)) % 3 === 0 ? .96 : 1);
-        if (y <= ty0 + 1) k *= 1.22; else if (x === tx0 + 1) k *= 1.12; else if (x === tx1 - 2) k *= .8;
+        if (y <= ty0 + 1) k *= on ? 1.35 : 1.15; else if (x === tx0 + 1) k *= on ? 1.25 : 1.1; else if (x === tx1 - 2) k *= .78;
         if (y >= Y0 + 2) k *= .86;
         pt(x, y, Math.min(255, cr * k), Math.min(255, cg * k), Math.min(255, cb * k));
       }
-      for (let y = Math.max(ty0 + 2, Y0); y < ty1; y++) if (!lim || y < lim[tx1]) pt(tx1, y, 10, 4, 1, 90);
-      if (on) for (let x = tx0 + 2; x < tx1 - 2; x += 2) pt(x, ty0 + 3, 255, 240, 200, 130);
-      const gl = tb.glyph || [], gx = tx0 + Math.floor((tw - 7) / 2), gy = ty0 + 5;
-      gl.forEach((row, yy) => [...row].forEach((c, xx) => { if (c === 'X') pt(gx + xx + 1, gy + yy + 1, 0, 0, 0, 110); }));
-      gl.forEach((row, yy) => [...row].forEach((c, xx) => { if (c === 'X') pt(gx + xx, gy + yy, 255, 246, 220); }));
+      for (let y = Math.max(ty0 + 2, Y0); y < ty1; y++) if (!lim || y < lim[tx1]) pt(tx1, y, 10, 4, 1, on ? 140 : 90);
+      if (on) { for (let x = tx0 + 2; x < tx1 - 2; x += 2) pt(x, ty0 + 2, 255, 244, 210, 200); for (let y = ty0 + 4; y < Math.min(ty1, Y0 + 2); y += 2) { pt(tx0 + 2, y, 255, 244, 210, 120); pt(tx1 - 3, y, 255, 244, 210, 120); } }
+      // emblem: 9x9 multicolour + auto outline; dimmed with the cloth when the tab is closed
+      const gl = tb.glyph || [], pal = tb.gpal || {}, gx = tx0 + Math.floor((tw - 9) / 2), gy = ty0 + (on ? 5 : 4);
+      const at = (xx, yy) => yy >= 0 && yy < gl.length && xx >= 0 && xx < 9 && gl[yy][xx] && gl[yy][xx] !== '.';
+      const ek = on ? 1 : .8;
+      for (let yy = -1; yy <= 9; yy++) for (let xx = -1; xx <= 9; xx++) {
+        if (at(xx, yy)) { const [r, g2, b2] = hexRGB(pal[gl[yy][xx]] || '#fff6dc'); pt(gx + xx, gy + yy, r * ek, g2 * ek, b2 * ek); }
+        else if (at(xx - 1, yy) || at(xx + 1, yy) || at(xx, yy - 1) || at(xx, yy + 1)) pt(gx + xx, gy + yy, 20, 10, 4, on ? 235 : 190);
+        else if (at(xx - 1, yy - 1)) pt(gx + xx, gy + yy, 0, 0, 0, 70);
+      }
     };
     if (o.tabs) {
-      const n = o.tabs.length, gap = 1, x0 = X0 + 9, span = X1 - 9 - x0, tw = Math.floor((span - gap * (n - 1)) / n);
+      const n = o.tabs.length, gap = 1, x0 = X0 + 6, span = X1 - 6 - x0, tw = Math.floor((span - gap * (n - 1)) / n);
       const off = Math.floor((span - (tw * n + gap * (n - 1))) / 2);
-      for (let i = 0; i < n; i++) { const tx0 = x0 + off + i * (tw + gap); tabX.push([tx0, tx0 + tw]); tabRects.push({ x: tx0 * P, y: 0, w: tw * P, h: (by0 + 2) * P }); paintTab(put, i, false); }
+      for (let i = 0; i < n; i++) { const tx0 = x0 + off + i * (tw + gap); tabX.push([tx0, tx0 + tw]); tabRects.push({ x: tx0 * P, y: 0, w: (tw + gap) * P, h: (by0 + 2) * P }); paintTab(put, i, false); }
     }
     // --- 3. pages: K stacked sheets offset outward + down under the top sheet; the top sheet is curved and shaded
     const topOff = s => s < .7 ? 2 * (1 - s / .7) ** 2 : 5 * ((s - .7) / .3) ** 2;      // s: 0 outer edge .. 1 spine
@@ -671,7 +700,8 @@
     cv.dataset.tag = tag; cv.style.width = cv.style.height = css + 'px';
     let src = plates.get(tag);
     if (!src) {
-      let im; try { im = await Art.load(b, t); } catch (e) { return; }
+      // v6: synchronous when the art is already loaded (preloaded at boot), so a page is complete the moment it is built
+      let im = Art.loaded(b, t); if (!im || !im.complete) { try { im = await Art.load(b, t); } catch (e) { return; } }
       src = document.createElement('canvas'); src.width = src.height = n; const g = src.getContext('2d');
       const k = Math.max(1, Math.ceil(n / im.naturalWidth)), up = document.createElement('canvas'); up.width = im.naturalWidth * k; up.height = im.naturalHeight * k;
       const ug = up.getContext('2d'); ug.imageSmoothingEnabled = false; ug.drawImage(im, 0, 0, up.width, up.height);
@@ -679,7 +709,7 @@
       plates.set(tag, src); if (plates.size > 72) plates.delete(plates.keys().next().value);
     }
     if (cv.dataset.tag !== tag) return;
-    cv.width = cv.height = n; const g = cv.getContext('2d'); g.clearRect(0, 0, n, n); g.drawImage(src, 0, 0);
+    cv.width = cv.height = n; const g = cv.getContext('2d'); g.clearRect(0, 0, n, n); g.drawImage(src, 0, 0); cv.dataset.ok = '1';
   }
   let zGeo = null;
   function zooLayout() {
@@ -691,7 +721,7 @@
     const bw = W - 16 * u, bh = Math.min(regBot - regTop, bw * 1.5);
     const bt = regTop + Math.max(0, (regBot - regTop - bh) / 2);
     Object.assign(book.style, { left: 8 * u + 'px', right: 'auto', width: bw + 'px', top: bt + 'px', height: bh + 'px', bottom: 'auto' });
-    const tabs = D.map((bm, i) => ({ col: tabCol(i), glyph: (TAB[bm.key] || [0, []])[1] }));
+    const tabs = D.map((bm, i) => ({ col: tabCol(i), glyph: (TAB[bm.key] || [0, []])[1], gpal: (TAB[bm.key] || [0, 0, {}])[2] }));
     zGeo = paintBook($('book-cv'), bw, bh, { tabs, ribbon: true, crops: true, seed: 5 });
     book.style.left = Math.round((W - parseFloat($('book-cv').style.width)) / 2) + 'px';
     book.style.setProperty('--pgL', zGeo.urlL); book.style.setProperty('--pgR', zGeo.urlR);
@@ -716,7 +746,7 @@
     if (isFound(b, t)) {
       const cv = document.createElement('canvas'); c.appendChild(cv);
       d.classList.add('found'); d.dataset.tier = t; n.textContent = a.n.toUpperCase();
-      drawPlate(cv, b, t, cd * .86);
+      plateWaits.push(drawPlate(cv, b, t, cd * .86));
       d.addEventListener('click', () => { if (!flipping && !swiped) openPopup(b, t); });
       d.setAttribute('role', 'button'); d.setAttribute('aria-label', a.n);
     } else {
@@ -734,67 +764,99 @@
     hd.firstChild.textContent = side === 'l' ? D[b].name.toUpperCase() : 'FIELD NOTES'; el.appendChild(hd);
     if (side === 'l') {
       const sd = document.createElement('div'); sd.className = 'spot signspot'; const si = document.createElement('img'); si.src = SIGN[b]; si.alt = D[b].name; sd.appendChild(si); el.appendChild(sd);
+      plateWaits.push(si.decode ? si.decode().catch(() => {}) : new Promise(r => { si.onload = si.onerror = r; }));
       for (let t = 1; t <= 5; t++) el.appendChild(spot(b, t));
     } else for (let t = 6; t <= 11; t++) el.appendChild(spot(b, t));
     const pn = document.createElement('div'); pn.className = 'pgno'; pn.textContent = '- ' + (b * 2 + (side === 'l' ? 1 : 2)) + ' -'; el.appendChild(pn);
   }
   function syncNav() {
-    $('zoo-n').textContent = foundCount();
+    $('zoo-n').textContent = $('zoo-hn').textContent = foundCount();   // v6: the x/88 count also sits in the Zoopedia header
     $('zoo-prev').disabled = $('zoo-cl').disabled = zb === 0; $('zoo-next').disabled = $('zoo-cr').disabled = zb === D.length - 1;
     $('book').dataset.biome = D[zb].key;
     document.querySelectorAll('#tabs .tab').forEach((t, i) => { t.classList.toggle('on', i === zb); t.setAttribute('aria-selected', i === zb); });
     if (zGeo) zGeo.drawActive($('book-tab'), zb);
   }
+  // v6 page cache: each page (biome, side) is built once and then *moved* between the spread, the turning leaf and back, so a
+  // turn never rebuilds DOM mid-animation (the v5 glitch: fresh <img>s + async plate canvases popping in during the turn).
+  // Entries carry a `ready` promise (plates painted + sign decoded); a turn waits for it (max 450 ms) under the input lock.
+  let plateWaits = [];
+  const pgCache = new Map(); let pgKey = '';
+  function pageKeyNow() {
+    return [unlockAll() ? 1 : 0, D.map((x, b) => [...seenOf(b)].sort((p, q) => p - q).join(',')).join('/'),
+      getComputedStyle($('book')).getPropertyValue('--cd').trim(), dpr, W, H].join('|');
+  }
+  function getPage(b, side) {
+    const k = pageKeyNow(); if (k !== pgKey) { pgCache.clear(); pgKey = k; }
+    const id = b + side; let e = pgCache.get(id);
+    if (!e) {
+      const el = document.createElement('div'); el.className = 'pgw'; plateWaits = [];
+      fillPage(el, b, side);
+      e = { el, b, side, ready: Promise.all(plateWaits).then(() => true) }; e.ready.then(() => { e.done = true; });
+      e.done = [...el.querySelectorAll('.spot.found canvas')].every(c => c.dataset.ok === '1') && [...el.querySelectorAll('img')].every(i => i.complete && i.naturalWidth > 0);
+      plateWaits = []; pgCache.set(id, e);
+    }
+    return e;
+  }
+  const mount = (host, e) => { if (host.firstChild !== e.el || host.childNodes.length !== 1) host.replaceChildren(e.el); };
+  function preloadNear(b) { [b - 1, b + 1].forEach(x => { if (x >= 0 && x < D.length) { getPage(x, 'l'); getPage(x, 'r'); Art.preload(x); } }); }
   function renderBook() {
-    fillPage($('pg-l'), zb, 'l'); fillPage($('pg-r'), zb, 'r'); syncNav();
-    if (zb + 1 < D.length) Art.preload(zb + 1);
-    if (zb > 0) Art.preload(zb - 1);
+    if (flipping) return;
+    mount($('pg-l'), getPage(zb, 'l')); mount($('pg-r'), getPage(zb, 'r')); syncNav();
+    preloadNear(zb);
   }
-  // copy a rendered page (canvases included) onto a leaf face
-  function copyPage(src, dst, side) {
-    dst.className = 'face ' + dst.classList[1] + ' page ' + (side === 'l' ? 'left' : 'right');
-    dst.innerHTML = src.innerHTML;
-    const a = src.querySelectorAll('canvas'), c = dst.querySelectorAll('canvas');
-    c.forEach((cv, i) => { const o = a[i]; if (!o) return; cv.width = o.width; cv.height = o.height; cv.style.cssText = o.style.cssText; try { cv.getContext('2d').drawImage(o, 0, 0); } catch (e) {} });
-  }
-  let flipping = false, swiped = false;
-  const FLIP_MS = 620;
+  let flipping = false, swiped = false, pend = null, zTarget = 0, turnLog = [];
+  const FLIP_MS = 620, READY_MAX = 450;
   function flipTo(nb) {
-    if (nb === zb || nb < 0 || nb >= D.length || flipping) return;
+    if (nb < 0 || nb >= D.length) return;
+    if (flipping) { pend = nb; return; }                              // locked: remember the latest wish, play it next
+    if (nb === zb) return;
+    flipping = true; pend = null; zTarget = nb;
+    const need = [getPage(nb, 'l'), getPage(nb, 'r')], t0 = performance.now();
+    Promise.race([Promise.all(need.map(e => e.ready)), new Promise(r => setTimeout(r, READY_MAX))]).then(() => turn(nb, performance.now() - t0));
+  }
+  function turn(nb, waited) {
     const dir = nb > zb ? 1 : -1, leaf = $('leaf'), sp = $('spread'), pl = $('pg-l'), pr = $('pg-r');
     const front = leaf.querySelector('.front'), back = leaf.querySelector('.back');
     const src = dir > 0 ? pr : pl, r = src.getBoundingClientRect(), sr = sp.getBoundingClientRect();
-    flipping = true;
-    // the leaf starts as a copy of the page being turned; its back is the new spread's facing page
-    copyPage(src, front, dir > 0 ? 'r' : 'l');
-    const tmp = document.createElement('div'); fillPage(tmp, nb, dir > 0 ? 'l' : 'r');
-    back.className = 'face back page ' + (dir > 0 ? 'left' : 'right'); back.innerHTML = ''; while (tmp.firstChild) back.appendChild(tmp.firstChild);
-    fillPage(dir > 0 ? pr : pl, nb, dir > 0 ? 'r' : 'l');               // the page underneath already shows the new spread
+    const eFront = getPage(zb, dir > 0 ? 'r' : 'l'), eBack = getPage(nb, dir > 0 ? 'l' : 'r'), eUnder = getPage(nb, dir > 0 ? 'r' : 'l');
+    turnLog.push({ from: zb, to: nb, waited: Math.round(waited), ready: [eBack.done, eUnder.done] }); if (turnLog.length > 40) turnLog.shift();
+    // the leaf takes the page being turned (moved, not copied); its back is the new spread's facing page
+    front.className = 'face front page ' + (dir > 0 ? 'right' : 'left'); mount(front, eFront);
+    back.className = 'face back page ' + (dir > 0 ? 'left' : 'right'); mount(back, eBack);
+    mount(src, eUnder);                                                  // the page underneath already shows the new spread
     Object.assign(leaf.style, { left: (r.left - sr.left) + 'px', top: (r.top - sr.top) + 'px', width: r.width + 'px', height: r.height + 'px',
       transformOrigin: dir > 0 ? '0 50%' : '100% 50%', transition: 'none', transform: 'rotateY(0deg)' });
     leaf.style.setProperty('--fd', FLIP_MS + 'ms'); sp.style.setProperty('--fd', FLIP_MS + 'ms');
-    leaf.classList.remove('hidden', 'go'); sp.classList.add('turning');
+    leaf.classList.remove('hidden', 'go', 'half'); sp.classList.add('turning');
     void leaf.offsetWidth;
     leaf.classList.add('go');
-    leaf.style.transition = 'transform ' + FLIP_MS + 'ms cubic-bezier(.42,.02,.3,1)';
-    leaf.style.transform = 'rotateY(' + (dir > 0 ? -180 : 180) + 'deg)';
     zb = nb; syncNav();
-    let done = false;
+    // two explicit halves: 0 -> 90deg (front shows), then the faces swap at the edge-on midpoint and 90 -> 180deg (back shows).
+    // The swap is done by class, so nothing depends on backface-visibility behaving inside a 3D transform.
+    const A = dir > 0 ? -180 : 180;
+    let done = false, an = null;
     const finish = () => {
       if (done) return; done = true;
-      fillPage(dir > 0 ? pl : pr, nb, dir > 0 ? 'l' : 'r');
-      leaf.classList.add('hidden'); leaf.classList.remove('go'); sp.classList.remove('turning');
-      front.innerHTML = ''; back.innerHTML = ''; flipping = false;
-      if (zb + 1 < D.length) Art.preload(zb + 1);
+      mount(dir > 0 ? pl : pr, eBack);                                   // the leaf's back page lands on the spread (moved)
+      leaf.classList.add('hidden'); leaf.classList.remove('go', 'half'); sp.classList.remove('turning');
+      if (an) try { an.cancel(); } catch (e) {}
+      leaf.style.transform = 'none'; front.replaceChildren(); back.replaceChildren(); flipping = false;
+      preloadNear(zb);
+      if (pend !== null && pend !== zb) { const p = pend; pend = null; flipTo(p); } else pend = null;
     };
-    // end exactly when the turn's transition finishes (Web Animations, iOS 13.4+); plain timer otherwise
-    requestAnimationFrame(() => {
-      const an = leaf.getAnimations ? leaf.getAnimations().find(x => x.transitionProperty === 'transform') : null;
-      if (an && an.finished) { an.finished.then(finish, finish); setTimeout(finish, FLIP_MS * 8); }
-      else setTimeout(finish, FLIP_MS + 30);
-    });
+    if (leaf.animate) {
+      an = leaf.animate([{ transform: 'rotateY(0deg)', easing: 'cubic-bezier(.5,0,.9,.55)' }, { transform: 'rotateY(' + A / 2 + 'deg)', easing: 'cubic-bezier(.1,.45,.5,1)' },
+        { transform: 'rotateY(' + A + 'deg)' }], { duration: FLIP_MS, fill: 'forwards' });
+      const half = () => { if (done) return; leaf.classList.toggle('half', (an.currentTime || 0) >= FLIP_MS / 2); requestAnimationFrame(half); };
+      requestAnimationFrame(half);
+      an.finished.then(finish, finish);
+      const guard = () => { if (done) return; if (an.playState === 'paused') setTimeout(guard, 500); else finish(); }; setTimeout(guard, FLIP_MS * 4);
+    } else {
+      leaf.style.transition = 'transform ' + FLIP_MS + 'ms linear'; leaf.style.transform = 'rotateY(' + A + 'deg)';
+      setTimeout(() => { if (!done) leaf.classList.add('half'); }, FLIP_MS / 2); setTimeout(finish, FLIP_MS + 30);
+    }
   }
-  const flip = dir => flipTo(zb + dir);
+  const flip = dir => { const base = pend !== null ? pend : flipping ? zTarget : zb; flipTo(Math.max(0, Math.min(D.length - 1, base + dir))); };
   $('zoo-prev').addEventListener('click', () => flip(-1));
   $('zoo-next').addEventListener('click', () => flip(1));
   $('zoo-cl').addEventListener('click', () => flip(-1));
@@ -810,7 +872,15 @@
   addEventListener('keydown', e => { if (cur !== 'zoo' || popOpen) return; if (e.key === 'ArrowRight') flip(1); else if (e.key === 'ArrowLeft') flip(-1); });
   function openZoo(o) { zooFrom = (o && o.from) || 'title'; show('zoo'); }
   hooks.zoo = {
-    enter() { zooLayout(); renderBook(); },
+    enter() {
+      zooLayout(); renderBook();
+      // never show a half-painted spread: if anything is still loading (cold cache), hold the pages hidden and reveal them all at once
+      const need = [getPage(zb, 'l'), getPage(zb, 'r')];
+      if (!need.every(e => e.done)) {
+        const sp = $('spread'); sp.classList.add('zwait');
+        Promise.race([Promise.all(need.map(e => e.ready)), new Promise(r => setTimeout(r, 2000))]).then(() => sp.classList.remove('zwait'));
+      }
+    },
     back() { if (zooFrom === 'game') show('game', 'resume'); else show('title'); },
   };
 
@@ -876,10 +946,12 @@
     if (popOpen) openPopup(popB, popT);
   }, 140); });
 
-  window.ZMUI = { go: show, openZoo, toast, get screen() { return cur; }, openPopup, closePopup, get popupOpen() { return popOpen; }, isFound, foundCount, get flipping() { return flipping; }, get spread() { return zb; }, flipTo: b => flipTo(b),
+  window.ZMUI = { go: show, openZoo, toast, get screen() { return cur; }, openPopup, closePopup, get popupOpen() { return popOpen; }, isFound, foundCount, get flipping() { return flipping; }, get preloaded() { return preloadDone; }, preloadAll, get turnLog() { return turnLog.slice(); }, get spread() { return zb; }, flipTo: b => flipTo(b),
     unlocked: unlockedB, foundIn, get mapSelected() { return selected; }, get mapLayout() { return mapL; },
     title: { get clock() { return TA.clock; }, get penguin() { return { mode: TA.pen.mode, taps: TA.pen.taps.length, falls: TA.pen.falls, waddles: TA.pen.waddles, pose: penPose() }; },
-      get bear() { return Object.assign({}, TA.bear); }, get monkey() { return Object.assign({}, TA.monk); }, hitRect, hitAt, timing: { WADDLE, FALL_T, BEAR_FIRST, BEAR_EVERY, BEAR_DUR, MONK_DUR } } };
+      get bear() { return Object.assign({ pose: bearPose() }, TA.bear); }, get monkey() { return Object.assign({ pose: monkPose() }, TA.monk); }, hitRect, hitAt, timing: { WADDLE, FALL_T, BEAR_FIRST, BEAR_EVERY, BEAR_DUR, MONK_DUR },
+      // test/screenshot helpers: freeze the title clock and step it by hand
+      hold(v) { TA.hold = !!v; }, setClock(c) { TA.clock = c; titleTick(); }, frames: { pen: PENF, bear: BEARF, monk: MONKF } } };
   // #play-<biome> (e.g. #play-ocean) starts that biome directly
   const playOpt = () => { const m = /^#play-(\w+)$/.exec(location.hash), b = m ? D.findIndex(x => x.key === m[1] || ISL[D.indexOf(x)].k === m[1]) : 0; return { mode: 'new', biome: Math.max(0, b) }; };
   const routeOf = () => /^#play-\w+$/.test(location.hash) ? 'game' : ({ '#play': 'game', '#map': 'map', '#zoo': 'zoo', '#zoopedia': 'zoo', '#scores': 'scores' }[location.hash] || 'title');

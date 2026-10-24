@@ -5,11 +5,11 @@
 (function () {
   'use strict';
   const D = window.ZM_DATA;
-  const imgs = {}, mips = {}, out = {};
+  const imgs = {}, mips = {}, out = {}, got = {};
   const key = (b, t) => D[b].key + '/' + String(t).padStart(2, '0');
   function load(b, t) {
     const k = key(b, t);
-    if (!imgs[k]) imgs[k] = new Promise((res, rej) => { const im = new Image(); im.onload = () => res(im); im.onerror = rej; im.src = 'art/' + k + '.png'; });
+    if (!imgs[k]) imgs[k] = new Promise((res, rej) => { const im = new Image(); im.onload = () => { got[k] = im; if (im.decode) im.decode().then(() => res(im), () => res(im)); else res(im); }; im.onerror = rej; im.src = 'art/' + k + '.png'; });
     return imgs[k];
   }
   // 4x NN upscale, then a halving chain (each step averages exact 2x2 blocks)
@@ -68,5 +68,5 @@
   // drop the big 4x temp canvases for a biome (or one tier) once its badges are rendered (phone memory)
   function forget(b, t) { for (let i = t || 1; i <= (t || 11); i++) delete mips[key(b, i)]; }
   function preload(b) { for (let t = 1; t <= 11; t++) load(b, t).catch(() => {}); }
-  window.ZMArt = { draw, preload, load, paint, forget, data: D };
+  window.ZMArt = { draw, preload, load, loaded: (b, t) => got[key(b, t)] || null, paint, forget, data: D };
 })();
