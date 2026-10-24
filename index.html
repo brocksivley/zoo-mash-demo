@@ -12,11 +12,43 @@
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="icon" href="icon-512.png">
 <link rel="manifest" href="manifest.webmanifest">
-<title>Zoo Mash · Forest</title>
-<link rel="stylesheet" href="style.css">
+<title>Zoo Mash</title>
+<link rel="stylesheet" href="style.css?v=fd1">
+<link rel="stylesheet" href="ui.css?v=fd1">
 </head>
 <body>
-<div id="app">
+<div id="scr-title" class="screen" data-screen="title">
+  <canvas id="title-cv" class="fullcv"></canvas>
+  <div class="tbar-plain"><button class="iconbtn gearbtn" aria-label="Settings"><svg viewBox="0 0 24 24"><g fill="currentColor"><rect x="10" y="1" width="4" height="6" transform="rotate(0 12 12)"/><rect x="10" y="1" width="4" height="6" transform="rotate(45 12 12)"/><rect x="10" y="1" width="4" height="6" transform="rotate(90 12 12)"/><rect x="10" y="1" width="4" height="6" transform="rotate(135 12 12)"/><rect x="10" y="1" width="4" height="6" transform="rotate(180 12 12)"/><rect x="10" y="1" width="4" height="6" transform="rotate(225 12 12)"/><rect x="10" y="1" width="4" height="6" transform="rotate(270 12 12)"/><rect x="10" y="1" width="4" height="6" transform="rotate(315 12 12)"/><circle cx="12" cy="12" r="7.5"/></g><circle cx="12" cy="12" r="3.2" fill="#121610"/></svg></button></div>
+  <nav id="title-menu">
+    <button data-go="map" class="tm play"><i>&#9654;</i>PLAY</button>
+    <button data-go="zoo" class="tm"><i>&#9654;</i>ZOOPEDIA</button>
+    <button data-go="scores" class="tm"><i>&#9654;</i>SCORES</button>
+    <button data-go="settings" class="tm"><i>&#9654;</i>SETTINGS</button>
+  </nav>
+</div>
+<div id="scr-map" class="screen hidden" data-screen="map">
+  <canvas id="map-cv" class="fullcv"></canvas>
+  <div class="hdr"><button class="wbtn back" aria-label="Back"><svg viewBox="0 0 16 16" shape-rendering="crispEdges"><path fill="currentColor" d="M2 8l6-6v4h6v4H8v4z"/></svg></button><div class="htitle">CHOOSE A BIOME</div><button class="iconbtn gearbtn" aria-label="Settings"><svg viewBox="0 0 24 24"><g fill="currentColor"><rect x="10" y="1" width="4" height="6" transform="rotate(0 12 12)"/><rect x="10" y="1" width="4" height="6" transform="rotate(45 12 12)"/><rect x="10" y="1" width="4" height="6" transform="rotate(90 12 12)"/><rect x="10" y="1" width="4" height="6" transform="rotate(135 12 12)"/><rect x="10" y="1" width="4" height="6" transform="rotate(180 12 12)"/><rect x="10" y="1" width="4" height="6" transform="rotate(225 12 12)"/><rect x="10" y="1" width="4" height="6" transform="rotate(270 12 12)"/><rect x="10" y="1" width="4" height="6" transform="rotate(315 12 12)"/><circle cx="12" cy="12" r="7.5"/></g><circle cx="12" cy="12" r="3.2" fill="#121610"/></svg></button></div>
+  <div id="map-items"></div>
+  <div id="map-panel">
+    <div id="mp-empty">TAP AN ISLAND</div>
+    <div id="mp-sel" class="hidden"><canvas id="mp-icon"></canvas><div class="mp-txt"><b id="mp-name">FOREST</b><span>BEST: <em id="mp-best">0</em></span><span>FOUND: <em id="mp-found">0/11</em></span></div><button id="mp-play" class="gbtn">PLAY</button></div>
+  </div>
+</div>
+<div id="scr-zoo" class="screen hidden" data-screen="zoo">
+  <canvas id="zoo-cv" class="fullcv"></canvas>
+  <div class="hdr green"><button class="wbtn back" aria-label="Back"><svg viewBox="0 0 16 16" shape-rendering="crispEdges"><path fill="currentColor" d="M2 8l6-6v4h6v4H8v4z"/></svg></button><div class="htitle">ZOOPEDIA</div><button class="iconbtn gearbtn" aria-label="Settings"><svg viewBox="0 0 24 24"><g fill="currentColor"><rect x="10" y="1" width="4" height="6" transform="rotate(0 12 12)"/><rect x="10" y="1" width="4" height="6" transform="rotate(45 12 12)"/><rect x="10" y="1" width="4" height="6" transform="rotate(90 12 12)"/><rect x="10" y="1" width="4" height="6" transform="rotate(135 12 12)"/><rect x="10" y="1" width="4" height="6" transform="rotate(180 12 12)"/><rect x="10" y="1" width="4" height="6" transform="rotate(225 12 12)"/><rect x="10" y="1" width="4" height="6" transform="rotate(270 12 12)"/><rect x="10" y="1" width="4" height="6" transform="rotate(315 12 12)"/><circle cx="12" cy="12" r="7.5"/></g><circle cx="12" cy="12" r="3.2" fill="#121610"/></svg></button></div>
+  <div id="zoo-count" class="plank"><span id="zoo-n">0</span>/88 ANIMALS FOUND</div>
+  <div id="book"><div class="page left" id="pg-l"></div><div class="spine"></div><div class="page right" id="pg-r"></div></div>
+  <div id="zoo-nav"><button class="obtn" id="zoo-prev" aria-label="Previous biome"><svg viewBox="0 0 16 16" shape-rendering="crispEdges"><path fill="currentColor" d="M1 8l6-6v4h8v4H7v4z"/></svg></button><button class="obtn menu" id="zoo-menu">MENU</button><button class="obtn" id="zoo-next" aria-label="Next biome"><svg viewBox="0 0 16 16" shape-rendering="crispEdges"><path fill="currentColor" d="M15 8l-6-6v4H1v4h8v4z"/></svg></button></div>
+</div>
+<div id="scr-scores" class="screen hidden" data-screen="scores">
+  <canvas id="scores-cv" class="fullcv"></canvas>
+  <div class="hdr"><button class="wbtn back" aria-label="Back"><svg viewBox="0 0 16 16" shape-rendering="crispEdges"><path fill="currentColor" d="M2 8l6-6v4h6v4H8v4z"/></svg></button><div class="htitle">SCORES</div><button class="iconbtn gearbtn" aria-label="Settings"><svg viewBox="0 0 24 24"><g fill="currentColor"><rect x="10" y="1" width="4" height="6" transform="rotate(0 12 12)"/><rect x="10" y="1" width="4" height="6" transform="rotate(45 12 12)"/><rect x="10" y="1" width="4" height="6" transform="rotate(90 12 12)"/><rect x="10" y="1" width="4" height="6" transform="rotate(135 12 12)"/><rect x="10" y="1" width="4" height="6" transform="rotate(180 12 12)"/><rect x="10" y="1" width="4" height="6" transform="rotate(225 12 12)"/><rect x="10" y="1" width="4" height="6" transform="rotate(270 12 12)"/><rect x="10" y="1" width="4" height="6" transform="rotate(315 12 12)"/><circle cx="12" cy="12" r="7.5"/></g><circle cx="12" cy="12" r="3.2" fill="#121610"/></svg></button></div>
+  <div id="score-list"></div>
+</div>
+<div id="app" class="screen hidden" data-screen="game">
   <div id="bg"></div>
   <canvas id="game"></canvas>
   <div id="topbar">
@@ -38,6 +70,20 @@
       <button id="p-zoo" class="wood">ZOOPEDIA</button>
     </div>
   </div>
+  <div id="mash">ZOO MASH!</div>
+  <div id="next"><div class="lbl">NEXT</div><img id="next-img" alt=""></div>
+  <div id="strip"><div id="slots"></div></div>
+  <div id="over" class="hidden">
+    <div class="panel">
+      <div class="title">GAME OVER</div>
+      <div class="row">SCORE <b id="o-score">0</b></div>
+      <div class="row">BEST <b id="o-best">0</b></div>
+      <div class="newbest hidden" id="o-new">NEW BEST!</div>
+      <button id="again">PLAY AGAIN</button>
+      <button id="o-menu" class="wood">MAIN MENU</button>
+    </div>
+  </div>
+</div>
   <div id="settings" class="modal hidden">
     <div class="panel">
       <div class="title">SETTINGS</div>
@@ -51,25 +97,28 @@
         <label class="tr"><span class="tl">WEIGHT <b id="v-weight"></b></span><input type="range" id="t-weight"><span class="th"><i>all equal</i><i>big = heavy</i></span></label>
         <button id="t-reset" class="wood small">RESET DEFAULTS</button>
       </div>
+      <div id="demo-unlock">
+        <div class="demo">UNLOCK ALL (DEMO)<small>DEMO ONLY · ZOOPEDIA TESTING</small></div>
+        <div class="tog"><span>ALL 88 ANIMALS</span><button class="sw" id="s-unlockall" role="switch" aria-label="Unlock all (demo)"></button></div>
+      </div>
       <button id="s-close">DONE</button>
     </div>
   </div>
-  <div id="mash">ZOO MASH!</div>
-  <div id="toast" class="hidden"></div>
-  <div id="next"><div class="lbl">NEXT</div><img id="next-img" alt=""></div>
-  <div id="strip"><div id="slots"></div></div>
-  <div id="over" class="hidden">
-    <div class="panel">
-      <div class="title">GAME OVER</div>
-      <div class="row">SCORE <b id="o-score">0</b></div>
-      <div class="row">BEST <b id="o-best">0</b></div>
-      <div class="newbest hidden" id="o-new">NEW BEST!</div>
-      <button id="again">PLAY AGAIN</button>
-    </div>
+<div id="popup" class="hidden" role="dialog" aria-modal="true">
+  <div class="card">
+    <button id="pop-x" aria-label="Close"><svg viewBox="0 0 12 12" shape-rendering="crispEdges"><path fill="currentColor" d="M1 3l2-2 3 3 3-3 2 2-3 3 3 3-2 2-3-3-3 3-2-2 3-3z"/></svg></button>
+    <div id="pop-name"></div>
+    <img id="pop-sign" alt="">
+    <div class="pop-body"><div class="pop-left"><canvas id="pop-badge"></canvas><div id="pop-tier"></div></div><div id="pop-fact"></div></div>
+    <div id="pop-evo"></div>
   </div>
-  <div id="rotate">Turn your phone upright to play</div>
 </div>
+<div id="toast" class="hidden"></div>
+<div id="rotate">Turn your phone upright to play</div>
 <script src="matter.min.js"></script>
-<script src="game.js"></script>
+<script src="data.js?v=fd1"></script>
+<script src="art.js?v=fd1"></script>
+<script src="game.js?v=fd1"></script>
+<script src="ui.js?v=fd1"></script>
 </body>
 </html>
