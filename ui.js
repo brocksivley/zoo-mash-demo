@@ -276,6 +276,61 @@
     if (e < down) return { frame: ['up', 'up2'][Math.floor((e - up) * 6) % 2] };
     const k = Math.floor((e - down) * 8); return k < 3 ? { frame: ['up', 'mid', 'low'][k] } : null;
   }
+  // v7.1 walk-on cat (not interactive): 2 s after the title opens it trots in from the left along the cobblestones, sits at
+  // its spot for 2 s (looks around, ear twitch, tail flick), then scurries off to the right; repeats every 15 s (start to
+  // start) and restarts from the 2 s delay each time the title is entered. Frames: 3-px-cell pixel poses (tools/title_cat_v71.py),
+  // positions snapped to the backdrop's 3-px cell phase. The exit lane dips below the penguin's lowest pixel (y 786, any of
+  // his frames) and stays above the PLAY text; if a viewport ever leaves no room for that, the cat is skipped there.
+  const catSheet = img('img/title-cat-v71.png?v=fd73');
+  const CATF = { fw: 120, fh: 90, foot: 84, idx: { walk0: 0, walk1: 1, walk2: 2, walk3: 3, sit0: 4, sit1: 5, sit2: 6, sit3: 7, sit4: 8, run0: 9, run1: 10, run2: 11, run3: 12 },
+    runUp: 72, below: 3 };       // run frames: ink reaches 72 px above the foot line and 3 px (outline) below it
+  // spotX/footY: Brock's circled spot (cat centred ~y 790); the run lane keeps the cat's top >= the penguin's lowest pixel + 6
+  const CAT = { delay: 2, period: 15, inDur: 1.2, sit: 2, runV: 470, spotX: 282, footY: 830, laneMax: 880, penBot: 786, penGap: 6, drop: 120 };
+  const SIT_SEQ = [['sit0', .5], ['sit1', .45], ['sit0', .2], ['sit2', .2], ['sit0', .15], ['sit3', .2], ['sit4', .15], ['sit0', .15]];
+  const catReduce = (() => { try { return matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) { return false; } })();
+  let cat0 = 0;
+  const snapX = v => Math.round((v - 2) / 3) * 3 + 2, snapY = v => Math.round((v - 1) / 3) * 3 + 1;
+  function catLane() {                       // foot line of the exit run (source px). v7.1: the cat may pass BEHIND the PLAY text
+    if (!tl) return null;                    // (the menu is a DOM layer above the title canvas, so PLAY stays readable and tappable);
+    const lane = Math.floor((CAT.laneMax - 1) / 3) * 3 + 1;              // it must still never touch the penguin's pixels
+    if (lane - CATF.runUp < CAT.penBot + CAT.penGap) return null;       // (backdrop coords are fixed, so this never triggers: 880-72 > 792)
+    return lane;
+  }
+  function catPose() {                       // {frame, x, y (frame top-left, source px), phase} or null
+    if (catReduce || !tl) return null;
+    const t = TA.clock - cat0 - CAT.delay; if (t < 0) return null;
+    const k = t % CAT.period, lane = catLane(); if (lane == null) return null;
+    const L = -tl.x0 / tl.s, R = (W - tl.x0) / tl.s, half = CATF.fw / 2;
+    const xIn0 = L - CATF.fw - 6, xSpot = CAT.spotX - half;
+    if (k < CAT.inDur) {                     // trot in: walk cycle at 10 fps, easing to a stop over the last ~15%
+      const u = k / CAT.inDur, e = u < .85 ? u / .85 * .92 : .92 + .08 * (1 - Math.pow(1 - (u - .85) / .15, 2));
+      return { phase: 'in', frame: 'walk' + (Math.floor(k * 10) % 4), x: snapX(xIn0 + (xSpot - xIn0) * Math.min(1, e)), y: snapY(CAT.footY - CATF.foot) };
+    }
+    let e = k - CAT.inDur;
+    if (e < CAT.sit) { let a = 0; for (const [f, d] of SIT_SEQ) { a += d; if (e < a) return { phase: 'sit', frame: f, x: snapX(xSpot), y: snapY(CAT.footY - CATF.foot) }; }
+      return { phase: 'sit', frame: 'sit0', x: snapX(xSpot), y: snapY(CAT.footY - CATF.foot) }; }
+    e -= CAT.sit;
+    const dx = e * CAT.runV, x = xSpot + dx; if (x > R + 6) return null;
+    const fy = CAT.footY + (lane - CAT.footY) * Math.min(1, dx / CAT.drop);   // dips to the lane in the first 120 px
+    return { phase: 'run', frame: 'run' + (Math.floor(e * 12) % 4), x: snapX(x), y: snapY(fy - CATF.foot) };
+  }
+  let catCv = null;
+  function drawCat(g) {
+    const cp = catPose(); if (!cp || !ready(catSheet)) return;
+    const i = CATF.idx[cp.frame];
+    // soft pixel shadow under the paws (3-px cells), then the frame
+    const fy = cp.y + CATF.foot, cx = cp.x + (cp.phase === 'sit' ? 58 : 52);   // centre of the ground contact (haunch->paws / hind->fore paws)
+    g.fillStyle = 'rgba(16,8,3,.32)';
+    const sw = cp.phase === 'sit' ? 18 : 24;
+    g.fillRect(cx - sw * 1.5, fy - 1, sw * 3, 3); g.fillRect(cx - sw * 1.5 + 6, fy + 2, sw * 3 - 12, 3);
+    // match the title's bottom darkening (buildTitle: 0 at 60% of the height -> .5 at the bottom) so the cat sits in the scene light
+    if (!catCv) { catCv = document.createElement('canvas'); catCv.width = CATF.fw; catCv.height = CATF.fh; }
+    const c = catCv.getContext('2d'); c.globalCompositeOperation = 'source-over'; c.clearRect(0, 0, CATF.fw, CATF.fh);
+    c.imageSmoothingEnabled = false; c.drawImage(catSheet, i * CATF.fw, 0, CATF.fw, CATF.fh, 0, 0, CATF.fw, CATF.fh);
+    const yc = (cp.y + CATF.fh / 2) * tl.s, a = Math.max(0, Math.min(.5, (yc - H * .6) / (H * .4) * .5));
+    if (a > 0) { c.globalCompositeOperation = 'source-atop'; c.fillStyle = `rgba(10,5,2,${a.toFixed(3)})`; c.fillRect(0, 0, CATF.fw, CATF.fh); }
+    g.drawImage(catCv, cp.x, cp.y);
+  }
   function drawCritters(g) {
     if (!tl) return;
     g.save(); g.setTransform(dpr * tl.s, 0, 0, dpr * tl.s, dpr * tl.x0, 0); g.imageSmoothingEnabled = false;
@@ -292,6 +347,7 @@
       const i = PENF.idx[pp.frame];
       g.drawImage(penSheet, i * PENF.fw, 0, PENF.fw, PENF.fh, PEN.heel[0] - PENF.at[0] + pp.dx, PEN.heel[1] - PENF.at[1] + pp.dy, PENF.fw, PENF.fh);
     }
+    drawCat(g);
     g.restore();
   }
   const tms = [...document.querySelectorAll('#title-menu .tm')];
@@ -301,7 +357,7 @@
     b.addEventListener('pointerenter', () => selTm(b)); b.addEventListener('pointerdown', () => selTm(b));
     b.addEventListener('click', () => { const go = b.dataset.go; if (go === 'settings') openSettings(); else if (go === 'zoo') openZoo({ from: 'title' }); else show(go); });
   });
-  hooks.title = { enter() { selTm(tms[0]); if (!titleBg) buildTitle(); } };
+  hooks.title = { enter() { selTm(tms[0]); if (!titleBg) buildTitle(); cat0 = TA.clock; } };
 
   // =====================================================================================
   // MAP
@@ -328,9 +384,13 @@
     const A = 7 * u, hw = 18 * u, cliff = 12 * u, E = A + hw + cliff + 4;
     const iw = 98 * u, gap = 8 * u, sw = 64 * u, sh = sw / 1.215, sg = 4 * u;
     const fh = iw * ISL[0].sz[1] / ISL[0].sz[0], lh = iw * 355 / 426;
-    // v7: the island column is compressed vertically by 18% and centred in the room between the header and the bottom panel
-    const Y0 = top + 18 * u + 0.6 * fh, Y7 = panelTop - 10 * u - lh * 0.5, MAP_SQ = 0.82;
-    const ym = (Y0 + Y7) / 2, half = (Y7 - Y0) / 2 * MAP_SQ, y0 = ym - half, step = 2 * half / 7;
+    // v7.1b (visual): island boxes are tight to their visible art (measured: <0.5% transparent margin), and hb is the header's visible
+    // ink bottom (buttons + shadow). The empty sky header -> Forest treetops is a small G (~ the near-touching rhythm of the zig-zag rows),
+    // the same G is left above the TAP AN ISLAND panel, and all the remaining height spreads the 8 rows evenly:
+    //   y0 - 0.6*fh = hb + G,   y0 + 7*step + 0.5*lh = panelTop - G   =>   step = (avail - 2G - 0.6fh - 0.5lh) / 7
+    const hb = st + 54 * u, avail = panelTop - hb, G = Math.max(8, 12 * u);
+    const step = (avail - 2 * G - 0.6 * fh - 0.5 * lh) / 7;
+    const y0 = hb + G + 0.6 * fh, MAP_SQ = 1, Y0 = y0, Y7 = y0 + 7 * step;
     const cx = W / 2, rows = [];
     for (let i = 0; i < 8; i++) {
       const left = i % 2 === 0, y = y0 + i * step;
@@ -339,7 +399,7 @@
       const un = unlockedB(i), h = un ? iw * ISL[i].sz[1] / ISL[i].sz[0] : lh, anchor = un ? 0.6 : 0.5;
       rows.push({ i, left, y, island: { x: icx - iw / 2, y: y - anchor * h, w: iw, h }, sign: { x: scx - sw / 2, y: y - sh / 2, w: sw, h: sh } });
     }
-    return { top, panelTop, A, hw, cliff, E, cx, y0, step, rows, squeeze: MAP_SQ, span0: Y7 - Y0, S: E + gap + 2 * u - hw, pathTop: y0 - step * 0.1, pathBot: panelTop + 30 };
+    return { top, panelTop, A, hw, cliff, E, cx, y0, step, rows, squeeze: MAP_SQ, span0: Y7 - Y0, gapG: G, hb, S: E + gap + 2 * u - hw, pathTop: y0 - step * 0.1, pathBot: panelTop + 30 };
   }
   // pixel-art sky, clouds and the chunky 3D cliff-edge path (1 canvas px = 2 CSS px)
   function drawMapBg() {
@@ -1126,7 +1186,7 @@
     title: { get clock() { return TA.clock; }, get penguin() { return { mode: TA.pen.mode, taps: TA.pen.taps.length, falls: TA.pen.falls, waddles: TA.pen.waddles, pose: penPose() }; },
       get bear() { return Object.assign({ pose: bearPose() }, TA.bear); }, get monkey() { return Object.assign({ pose: monkPose() }, TA.monk); }, hitRect, hitAt, timing: { WADDLE, FALL_T, MONK_DUR, BEAR }, bearRng(fn) { bearRng = fn || Math.random; }, glyph: GLYPH,
       // test/screenshot helpers: freeze the title clock and step it by hand
-      hold(v) { TA.hold = !!v; }, setClock(c) { TA.clock = c; titleTick(); }, frames: { pen: PENF, bear: BEARF, monk: MONKF } } };
+      hold(v) { TA.hold = !!v; }, setClock(c) { TA.clock = c; titleTick(); }, frames: { pen: PENF, bear: BEARF, monk: MONKF, cat: CATF }, cat: { get pose() { return catPose(); }, get lane() { return catLane(); }, get t0() { return cat0; }, CAT, reduce: catReduce } } };
   // #play-<biome> (e.g. #play-ocean) starts that biome directly
   const playOpt = () => { const m = /^#play-(\w+)$/.exec(location.hash), b = m ? D.findIndex(x => x.key === m[1] || ISL[D.indexOf(x)].k === m[1]) : 0; return { mode: 'new', biome: Math.max(0, b) }; };
   const routeOf = () => /^#play-\w+$/.test(location.hash) ? 'game' : ({ '#play': 'game', '#map': 'map', '#zoo': 'zoo', '#zoopedia': 'zoo', '#scores': 'scores' }[location.hash] || 'title');
