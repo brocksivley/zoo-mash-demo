@@ -1,10 +1,13 @@
-/* Zoo Mash – Forest prototype. Numbers from zoo-mash-spec/physics-config.json */
+/* Zoo Mash – the drop-and-merge level, all 8 biomes. Numbers from zoo-mash-spec/physics-config.json */
 (function () {
   'use strict';
   const { Engine, Bodies, Body, Composite, Events, Vector } = Matter;
 
   // ---- spec ----
-  const NAMES = ['ladybug','mouse','frog','squirrel','owl','raccoon','fox','deer','wolf','moose','bear'];
+  const NAMES = ['ladybug','mouse','frog','squirrel','owl','raccoon','fox','deer','wolf','moose','bear']; // Forest sprite files
+  const D = window.ZM_DATA, KEYS = D.map(b => b.key);
+  const THEME = k => (k === 'dinosaurs' ? 'jurassic' : k);       // theme / backdrop / island file key
+  let B = 0;                                                      // current biome index (0 Forest … 7 Space)
   const RFRAC = [0.0368,0.0536,0.0681,0.0770,0.0993,0.1272,0.1440,0.1741,0.1975,0.2455,0.2891];
   const POINTS = n => n * (n - 1) / 2;          // creating tier n
   const BOSS_PAIR = 250;                         // two tier-11 bears merge and vanish
@@ -46,11 +49,12 @@
   const OUTLINE_W = 0.0253, RIM_W = 0.0101;      // outline / light rim thickness as a fraction of the radius (from the art)
 
   // ---- storage ----
-  const LS_BEST = 'zoomash.forest.best', LS_SEEN = 'zoomash.forest.seen';
+  // per-biome keys: zoomash.<key>.best / zoomash.<key>.seen (Forest keeps its v4 keys, which follow the same pattern)
+  const lsKey = (b, k) => `zoomash.${KEYS[b]}.${k}`;
   const ls = { get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
                set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} } };
-  let best = ls.get(LS_BEST, 0) | 0;
-  let seen = new Set(ls.get(LS_SEEN, []));
+  let best = ls.get(lsKey(0, 'best'), 0) | 0;
+  let seen = new Set(ls.get(lsKey(0, 'seen'), []));
   const prefs = Object.assign({ vibration: true, sound: true, music: true }, ls.get(LS_PREFS, {})); // sound/music: placeholders for now
   const buzz = ms => { try { if (prefs.vibration && navigator.vibrate) navigator.vibrate(ms); } catch (e) {} };
   const tune = Object.assign({}, TUNE_DEF, ls.get(LS_TUNE, {}));
@@ -63,15 +67,42 @@
   const elOver = $('over'), elPause = $('pausemenu'), elSet = $('settings');
 
   // ---- sprites ----
-  const sprites = NAMES.map((n, i) => { const im = new Image(); im.src = (window.ZM_SPR && window.ZM_SPR[i]) || `sprites/${String(i + 1).padStart(2, '0')}-${n}.png?v=hd1`; return im; });
+  // Forest: the approved 4x sprites. Other biomes: art/<key>/NN.png painted by ZMArt (same 4x-NN + mip recipe).
+  const forestSprites = NAMES.map((n, i) => { const im = new Image(); im.src = (window.ZM_SPR && window.ZM_SPR[i]) || `sprites/${String(i + 1).padStart(2, '0')}-${n}.png?v=hd1`; return im; });
+  let sprites = forestSprites, artGen = 0;
   // Badge images for the evolution strip and NEXT preview are drawn by the same code as the board (see badgeURL).
   const BLANK = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
   let badgeURLs = [];
   const spriteSrc = t => badgeURLs[t - 1] || BLANK;
   let spritesReady = false;
-  Promise.all(sprites.map(im => im.decode ? im.decode().catch(() => new Promise(r => { if (im.complete) r(); else im.onload = im.onerror = r; }))
-                                         : new Promise(r => { if (im.complete) r(); else im.onload = im.onerror = r; })))
-    .then(() => { spritesReady = true; buildBadgeURLs(); renderStrip(); setNextUI(); });
+  const waitImg = im => (im.decode ? im.decode().catch(() => new Promise(r => { if (im.complete) r(); else im.onload = im.onerror = r; }))
+                                   : new Promise(r => { if (im.complete) r(); else im.onload = im.onerror = r; })).then(() => im);
+  function loadBiomeArt(b) {
+    const gen = ++artGen; spritesReady = false; mips.length = 0; badgeCache.length = 0; badgeURLs = [];
+    const ps = b === 0 ? forestSprites.map(waitImg) : Array.from({ length: 11 }, (_, i) => window.ZMArt.load(b, i + 1).catch(() => new Image()));
+    Promise.all(ps).then(arr => {
+      if (gen !== artGen) return;
+      sprites = arr; tierCols = b === 0 ? TIER_COL : arr.map((im, i) => artColors(im, D[b].animals[i]));
+      spritesReady = true; buildBadgeURLs(); renderStrip(); setNextUI();
+    });
+  }
+  // burst colours for the other biomes: the 3 most common opaque colours of each animal's own art
+  function artColors(im, a) {
+    try {
+      const c = document.createElement('canvas'); c.width = im.naturalWidth; c.height = im.naturalHeight;
+      const g = c.getContext('2d'); g.drawImage(im, 0, 0); const d = g.getImageData(0, 0, c.width, c.height).data, h = new Map();
+      const hex = v => parseInt(v.slice(1), 16), bgv = hex(a.bg), br = bgv >> 16, bgg = (bgv >> 8) & 255, bb = bgv & 255;
+      for (let i = 0; i < d.length; i += 4) {
+        if (d[i + 3] < 200) continue; const r = d[i], gg = d[i + 1], b = d[i + 2];
+        if (r + gg + b < 90) continue;                                                   // outlines
+        if (Math.abs(r - br) + Math.abs(gg - bgg) + Math.abs(b - bb) < 60) continue;       // badge background
+        const k = ((r >> 4) << 8) | ((gg >> 4) << 4) | (b >> 4); h.set(k, (h.get(k) || 0) + 1);
+      }
+      const top = [...h.entries()].sort((x, y) => y[1] - x[1]).slice(0, 3).map(([k]) => '#' + [k >> 8, (k >> 4) & 15, k & 15].map(v => (v * 17).toString(16).padStart(2, '0')).join(''));
+      while (top.length < 3) top.push(a.rim || '#ffffff');
+      return top;
+    } catch (e) { return [a.bg, a.rim || '#fff', a.ring || '#000']; }
+  }
 
   // ---- layout ----
   let L = {}, dpr = 1, lastBadgeDpr = 0;
@@ -175,9 +206,10 @@
     ['#9a6b3f','#e8c48a','#f2d36b'],['#7d7a78','#2b2b2b','#d9d4cf'],['#e2702a','#fff1de','#8a3a14'],['#b07a45','#f0d2a2','#5a3a1e'],
     ['#7f8ea0','#d4dbe3','#3c4652'],['#7a4e2c','#c79a62','#3f2714'],['#6b4226','#c08a55','#2b190c'],['#ffd75e','#fff3b0','#ff9f3a']];
   const MASH_COL = ['#ffd75e','#ff5a3c','#7dff6a','#5ecbff','#ff8ad4','#fff6d0','#ff9f3a','#ffffff','#c79a62'];
+  let tierCols = TIER_COL;
   function burst(x, y, r, t) {
     fx.push({ k: 'ring', x, y, r0: r * 0.8, r1: r * 1.7, t0: now, dur: 0.32 });
-    const cols = TIER_COL[t - 1], n = 10 + Math.min(14, t * 2);
+    const cols = tierCols[t - 1] || TIER_COL[t - 1], n = 10 + Math.min(14, t * 2);
     for (let i = 0; i < n; i++) {
       const a = (i / n) * Math.PI * 2 + Math.random() * 0.5, sp = (90 + Math.random() * 150) * (0.7 + r / 120);
       fx.push({ k: 'px', x: x + Math.cos(a) * r * 0.6, y: y + Math.sin(a) * r * 0.6, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 60,
@@ -255,14 +287,16 @@
   function addScore(p) {
     score += p; mergesTotal++;
     elScore.textContent = score.toLocaleString('en-US');
-    if (score > best) { best = score; ls.set(LS_BEST, best); elBest.textContent = best.toLocaleString('en-US'); }
+    if (score > best) { best = score; ls.set(lsKey(B, 'best'), best); elBest.textContent = best.toLocaleString('en-US'); }
   }
   function setNextUI() { elNext.src = spriteSrc(next); }
 
   function markSeen(t) {
     if (seen.has(t)) return;
-    seen.add(t); ls.set(LS_SEEN, [...seen].sort((a, b) => a - b));
+    seen.add(t); ls.set(lsKey(B, 'seen'), [...seen].sort((a, b) => a - b));
     renderStrip(t);
+    // progression: reaching this biome's tier-11 animal unlocks the next biome on the map
+    if (t === 11 && B < D.length - 1) toast(D[B + 1].name + ' UNLOCKED!');
   }
   function renderStrip(popTier) {
     const W = window.innerWidth;
@@ -271,7 +305,7 @@
     elSlots.innerHTML = '';
     for (let t = 1; t <= 11; t++) {
       const d = document.createElement('div');
-      if (seen.has(t)) { d.className = 'slot'; const im = document.createElement('img'); im.src = spriteSrc(t); im.alt = NAMES[t - 1]; d.appendChild(im); }
+      if (seen.has(t)) { d.className = 'slot'; const im = document.createElement('img'); im.src = spriteSrc(t); im.alt = D[B].animals[t - 1].n; d.appendChild(im); }
       else { d.className = 'slot locked'; d.textContent = '?'; }
       if (t === popTier) d.classList.add('pop');
       elSlots.appendChild(d);
@@ -372,6 +406,7 @@
     canvas.width = Math.round(L.W * dpr); canvas.height = Math.round(L.H * dpr);
     canvas.style.width = L.W + 'px'; canvas.style.height = L.H + 'px';
     document.getElementById('bg').style.bottom = (L.H - L.stripTop) + 'px';
+    if (window.ZMAmb) window.ZMAmb.layout(L.W, L.stripTop);
     buildStatics(); vCapB = 0.8 * RFRAC[0] * L.Wi * (16.667 / STEP);
     if (!first && old.Wi) {
       const s = L.Wi / old.Wi;
@@ -388,7 +423,27 @@
 
   // ---- static decor (pre-rendered pixel art: trunks + forest floor) ----
   let decor = null;
+  // per-biome palette for the floor band, its lip and the two side posts (Forest = the approved v4 look)
+  const DECOR = {
+    forest:   { earth: [52, 32, 16], spk: ['rgba(40,24,10,.55)', 'rgba(150,110,70,.35)'], stone: ['#6d655e', '#9a918a'], lip: ['#3f6b25', '#5f9233'],
+                bark: ['#4a2e1a', '#5b3920', '#6a4426', '#3c2414'], edge: '#2a190c', hl: '#7d5230' },
+    ocean:    { earth: [120, 92, 52], spk: ['rgba(80,60,30,.45)', 'rgba(255,240,200,.35)'], stone: ['#5d6b70', '#8fa0a6'], lip: ['#d9c08a', '#f0dcae'],
+                bark: ['#2f4f5a', '#365c68', '#3e6a77', '#24404a'], edge: '#132a31', hl: '#6aa3ad' },
+    farm:     { earth: [74, 48, 22], spk: ['rgba(50,30,12,.5)', 'rgba(170,130,80,.35)'], stone: ['#7a6e62', '#a39686'], lip: ['#4f8a2a', '#7cbf45'],
+                bark: ['#8a5a32', '#9a6a3c', '#a87644', '#6e4626'], edge: '#3a2210', hl: '#c89a62', plank: true },
+    arctic:   { earth: [200, 225, 240], spk: ['rgba(140,180,210,.45)', 'rgba(255,255,255,.6)'], stone: ['#8fb2cc', '#c8e2f2'], lip: ['#ffffff', '#d6ecf8'],
+                bark: ['#a8cfe6', '#b8dcf0', '#c8e6f6', '#8fbad6'], edge: '#3b5a78', hl: '#eef8ff' },
+    oriental: { earth: [60, 44, 24], spk: ['rgba(40,28,12,.5)', 'rgba(150,120,80,.3)'], stone: ['#6e6a66', '#9c9690'], lip: ['#4f7a2a', '#7aa840'],
+                bark: ['#5e8a2e', '#6b9a36', '#7aab40', '#4a6e22'], edge: '#24380f', hl: '#a8d064', nodes: '#3d5a1a' },
+    savannah: { earth: [110, 70, 30], spk: ['rgba(70,40,15,.5)', 'rgba(230,190,110,.35)'], stone: ['#6e5c4c', '#9a8674'], lip: ['#c8962e', '#e6bc56'],
+                bark: ['#6a4426', '#7a5030', '#8a5c36', '#523218'], edge: '#2b190c', hl: '#a87a4a' },
+    jurassic: { earth: [70, 40, 25], spk: ['rgba(40,20,10,.55)', 'rgba(255,140,60,.25)'], stone: ['#4a3e3c', '#6e605c'], lip: ['#4a6a22', '#6f9a30'],
+                bark: ['#3a3030', '#463a3a', '#524444', '#2a2222'], edge: '#120d0d', hl: '#7a6060' },
+    space:    { earth: [30, 36, 52], spk: ['rgba(10,14,22,.5)', 'rgba(150,170,200,.3)'], stone: ['#56617a', '#8a97b0'], lip: ['#33e1ff', '#7d8ba0'],
+                bark: ['#4a5466', '#56617a', '#626e88', '#3a4252'], edge: '#0b0f16', hl: '#9aa8c0', rivets: '#9aa8c0' },
+  };
   function buildDecor() {
+    const Pal = DECOR[THEME(KEYS[B])] || DECOR.forest;
     const P = 2; // logical px per art pixel
     decor = document.createElement('canvas');
     const w = Math.ceil(L.W / P), h = Math.ceil(L.H / P);
@@ -397,32 +452,35 @@
     // forest floor band
     const fy = Math.round(L.floorY / P), sy = Math.ceil(L.stripTop / P) + 1;
     // translucent earth so the painted forest floor in the backdrop shows through
-    for (let y = fy; y < sy; y++) { const k = (y - fy) / Math.max(1, sy - fy); g.fillStyle = `rgba(52,32,16,${(0.30 + 0.35 * k).toFixed(3)})`; g.fillRect(0, y, w, 1); }
+    for (let y = fy; y < sy; y++) { const k = (y - fy) / Math.max(1, sy - fy); g.fillStyle = `rgba(${Pal.earth.join(',')},${(0.30 + 0.35 * k).toFixed(3)})`; g.fillRect(0, y, w, 1); }
     for (let i = 0; i < w * (sy - fy) / 40; i++) { const x = (R() * w) | 0, y = fy + 2 + ((R() * Math.max(1, sy - fy - 3)) | 0);
-      g.fillStyle = R() < .5 ? 'rgba(40,24,10,.55)' : 'rgba(150,110,70,.35)'; g.fillRect(x, y, 1 + (R() < .3), 1); }
+      g.fillStyle = R() < .5 ? Pal.spk[0] : Pal.spk[1]; g.fillRect(x, y, 1 + (R() < .3), 1); }
     for (let i = 0; i < w / 14; i++) { const x = (R() * w) | 0, y = fy + 4 + ((R() * Math.max(1, sy - fy - 7)) | 0);
-      g.fillStyle = '#6d655e'; g.fillRect(x, y, 3, 2); g.fillStyle = '#9a918a'; g.fillRect(x, y, 2, 1); }
+      g.fillStyle = Pal.stone[0]; g.fillRect(x, y, 3, 2); g.fillStyle = Pal.stone[1]; g.fillRect(x, y, 2, 1); }
     g.fillStyle = 'rgba(0,0,0,.3)'; g.fillRect(0, fy, w, 2);
     // grass lip
     for (let x = 0; x < w; x++) {
       const hgt = 1 + ((R() * 3) | 0);
-      g.fillStyle = '#3f6b25'; g.fillRect(x, fy - hgt, 1, hgt + 1);
-      if (R() < .35) { g.fillStyle = '#5f9233'; g.fillRect(x, fy - hgt - 1, 1, 1); }
+      g.fillStyle = Pal.lip[0]; g.fillRect(x, fy - hgt, 1, hgt + 1);
+      if (R() < .35) { g.fillStyle = Pal.lip[1]; g.fillRect(x, fy - hgt - 1, 1, 1); }
     }
     // trunks
     const tw = Math.ceil(L.wall / P) + 2, ty0 = Math.floor(L.top / P), ty1 = Math.round(L.trunkEnd / P);
-    const bark = ['#4a2e1a', '#5b3920', '#6a4426', '#3c2414'];
+    const bark = Pal.bark;
     for (const side of [0, 1]) {
       for (let y = ty0; y < ty1; y++) for (let i = 0; i < tw; i++) {
         const x = side ? w - 1 - i : i;
         let c = bark[(R() * 3) | 0];
-        if (i === tw - 1) c = '#2a190c';                               // inner edge outline
-        else if (i === tw - 2) c = '#7d5230';                          // highlight
-        else if ((y + i * 3) % 7 === 0) c = bark[3];                   // bark grooves
+        if (i === tw - 1) c = Pal.edge;                                // inner edge outline
+        else if (i === tw - 2) c = Pal.hl;                             // highlight
+        else if (Pal.nodes && (y - ty0) % 22 < 2) c = Pal.nodes;       // bamboo nodes
+        else if (Pal.plank && (y - ty0) % 16 === 0) c = Pal.edge;      // fence-plank seams
+        else if (Pal.rivets && (y - ty0) % 18 === 4 && i === 1) c = Pal.rivets; // hull rivets
+        else if (!Pal.nodes && !Pal.rivets && (y + i * 3) % 7 === 0) c = bark[3]; // bark grooves
         g.fillStyle = c; g.fillRect(x, y, 1, 1);
       }
       // rounded/root tip where the trunk stops short of the ground
-      g.fillStyle = '#2a190c';
+      g.fillStyle = Pal.edge;
       for (let i = 0; i < tw; i++) { const x = side ? w - 1 - i : i; g.fillRect(x, ty1, 1, 1 + (i < tw - 2 ? 1 : 0)); }
     }
   }
@@ -449,6 +507,7 @@
   }
   // Paint tier t's badge, circle of outer radius R (canvas px) centred at (cx, cy), onto 2D context g.
   function paintBadge(g, t, cx, cy, R) {
+    if (B !== 0) { const im = sprites[t - 1]; if (im && im.naturalWidth) window.ZMArt.paint(g, B, t, im, cx, cy, R); return; }
     const [ax, ay, aR, bg] = ART[t - 1], ro = R, rr = R * (1 - OUTLINE_W), rb = R * (1 - OUTLINE_W - RIM_W);
     g.save();
     g.fillStyle = RIM_COL; g.beginPath(); g.arc(cx, cy, rr + 0.5, 0, Math.PI * 2); g.fill();          // light rim
@@ -469,15 +528,19 @@
   function badgeCanvas(t, r) {
     const D = 2 * r * dpr, c0 = badgeCache[t - 1];
     if (c0 && Math.abs(c0.D - D) < 0.01) return c0.c;
-    const im = sprites[t - 1]; if (!im.complete || !im.naturalWidth) return null;
-    const c = document.createElement('canvas'); c.width = c.height = 2 * Math.ceil(D / 2 + BADGE_PAD);
+    const im = sprites[t - 1]; if (!spritesReady || !im || !im.complete || !im.naturalWidth) return null;
+    const ov = B ? Math.max(1, window.ZM_DATA[B].animals[t - 1].ov || 1) : 1;   // Saturn's rings poke out of the circle
+    const c = document.createElement('canvas'); c.width = c.height = 2 * Math.ceil(D * ov / 2 + BADGE_PAD);
     paintBadge(c.getContext('2d'), t, c.width / 2, c.height / 2, D / 2);
+    if (B) window.ZMArt.forget(B, t);
     badgeCache[t - 1] = { D, c }; return c;
   }
   function buildBadgeURLs() {
     const px = Math.max(96, Math.ceil(40 * dpr)), c = document.createElement('canvas'), g = c.getContext('2d');
     c.width = c.height = px;
-    badgeURLs = NAMES.map((n, i) => { g.clearRect(0, 0, px, px); paintBadge(g, i + 1, px / 2, px / 2, px / 2 - 0.5); return c.toDataURL('image/png'); });
+    badgeURLs = NAMES.map((n, i) => { const ov = B ? Math.max(1, D[B].animals[i].ov || 1) : 1;
+      g.clearRect(0, 0, px, px); paintBadge(g, i + 1, px / 2, px / 2, (px / 2 - 0.5) / ov); return c.toDataURL('image/png'); });
+    if (B) window.ZMArt.forget(B);
   }
   function drawSprite(t, x, y, r, ang = 0, scale = 1) {
     const c = badgeCanvas(t, r); if (!c) return;
@@ -561,12 +624,14 @@
       checkDanger(dt);
     } else acc = 0;
     renderDt = dt; render();
+    if (window.ZMAmb) { const run = !paused && !gameOver && !document.hidden; window.ZMAmb.tick(run ? dt : 0, run); }
     requestAnimationFrame(frame);
   }
 
   // ---- test hooks (used by headless tests; harmless in play) ----
   window.ZM = {
-    get state() { return { score, best, current, next, gameOver, paused, prefs: Object.assign({}, prefs), animals: [...animals].map(b => ({ t: b.zm.tier, x: +b.position.x.toFixed(1), y: +b.position.y.toFixed(1), r: +b.zm.r.toFixed(1), fresh: b.zm.fresh })), seen: [...seen], layout: L, dropsTotal, mergesTotal, ready: isReady(), fallTime, cooldown: dropGap(), pops: pops.map(p => p.txt) }; },
+    get state() { return { score, best, current, next, gameOver, paused, prefs: Object.assign({}, prefs), animals: [...animals].map(b => ({ t: b.zm.tier, x: +b.position.x.toFixed(1), y: +b.position.y.toFixed(1), r: +b.zm.r.toFixed(1), fresh: b.zm.fresh })), seen: [...seen], layout: L, dropsTotal, mergesTotal, ready: isReady(), fallTime, cooldown: dropGap(), pops: pops.map(p => p.txt), biome: B, biomeKey: KEYS[B], artReady: spritesReady, theme: document.body.dataset.biome || null, bgImage: document.getElementById('bg').style.backgroundImage, ambient: window.ZMAmb ? window.ZMAmb.state() : null, tierCols: tierCols.slice(0, 11) }; },
+    setPaused(v) { paused = !!v; },
     setCurrent(t) { current = t; }, setNext(t) { next = t; setNextUI(); },
     dropAt(xFrac) { aimX = L.left + xFrac * L.Wi; return drop(); },
     spawn(t, xFrac, yPx) { return !!makeAnimal(t, L.left + xFrac * L.Wi, yPx, 0, 0, false); },
@@ -579,13 +644,25 @@
 
   // ---- boot: the level only starts when ui.js enters the game screen ----
   let active = false, running = false, booted = false, needResize = false;
+  function setBiome(b, first) {
+    B = b; best = ls.get(lsKey(b, 'best'), 0) | 0; seen = new Set(ls.get(lsKey(b, 'seen'), []));
+    const th = THEME(KEYS[b]), src = b === 0 ? 'forest-bg.jpg' : `bg/${th}.png`;
+    document.body.dataset.biome = th;                                     // ui-themes/themes.css: HUD, NEXT frame, strip
+    const bg = document.getElementById('bg'); bg.style.backgroundImage = `url(${src})`; bg.classList.toggle('pix', b !== 0);
+    bg.dataset.biome = th;
+    loadBiomeArt(b);
+    if (window.ZMAmb) window.ZMAmb.setBiome(th, src);
+    if (!first) { buildDecor(); renderStrip(); }
+  }
   function startLoop() { if (running) return; running = true; requestAnimationFrame(t => { last = t; frame(t); }); }
   window.ZMGame = {
     // mode 'new': fresh run. mode 'resume': back from the Zoopedia with the pause menu open.
-    enter(mode) {
+    enter(mode, biome) {
       active = true;
-      if (!booted) { booted = true; renderStrip(); resize(true); reset(); }
+      const want = (mode === 'resume' || biome == null) ? B : Math.max(0, Math.min(D.length - 1, biome | 0));
+      if (!booted) { booted = true; setBiome(want, true); renderStrip(); resize(true); reset(); }
       else {
+        if (want !== B || !document.body.dataset.biome) setBiome(want);
         if (needResize || window.innerWidth !== L.W || window.innerHeight !== L.H) { needResize = false; resize(false); }
         if (mode === 'resume' && !gameOver) { renderStrip(); openPanel(elPause); }
         else reset();
@@ -595,7 +672,10 @@
     leave() { active = false; aiming = false; paused = true; elPause.classList.add('hidden'); },
     get active() { return active; },
     get best() { return best; },
+    get biome() { return B; },
+    bestOf(b) { return ls.get(lsKey(b, 'best'), 0) | 0; },
+    seenOf(b) { return ls.get(lsKey(b, 'seen'), []); },
     seen() { return [...seen]; },
-    refreshSeen() { seen = new Set(ls.get(LS_SEEN, [])); best = ls.get(LS_BEST, 0) | 0; },
+    refreshSeen() { seen = new Set(ls.get(lsKey(B, 'seen'), [])); best = ls.get(lsKey(B, 'best'), 0) | 0; },
   };
 })();

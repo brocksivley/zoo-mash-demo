@@ -1,4 +1,5 @@
-/* Zoo Mash – screens around the Forest level: title, biome map, Zoopedia (+ fun-fact popup), scores, settings.
+/* Zoo Mash – screens around the levels: title (+ tappable penguin / waving bear / banana monkey), biome map (8 islands,
+   progression: reaching tier 11 in a biome unlocks the next one), Zoopedia (+ fun-fact popup), scores, settings.
    Pure canvas/DOM, no libraries. game.js owns the level; this file only enters/leaves it through window.ZMGame. */
 (function () {
   'use strict';
@@ -6,7 +7,8 @@
   const D = window.ZM_DATA, Art = window.ZMArt;
   const ls = { get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
                set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} } };
-  const LS_UNLOCK = 'zoomash.demo.unlockAll', LS_BEST = 'zoomash.forest.best', LS_SEEN = 'zoomash.forest.seen';
+  const LS_UNLOCK = 'zoomash.demo.unlockAll';
+  const lsKey = (b, k) => 'zoomash.' + D[b].key + '.' + k;          // same keys game.js uses (forest = the v4 keys)
   const dprOf = () => Math.min(3, window.devicePixelRatio || 1);
   let W = innerWidth, H = innerHeight, u = 1, dpr = dprOf(), st = 0, sb = 0;
   function measure() {
@@ -24,9 +26,13 @@
 
   // ---------- found / unlock state ----------
   const unlockAll = () => !!ls.get(LS_UNLOCK, false);
-  const forestSeen = () => new Set(ls.get(LS_SEEN, []));
-  function isFound(b, t) { return unlockAll() || (b === 0 && forestSeen().has(t)); }
-  function foundCount() { if (unlockAll()) return 88; return [...forestSeen()].filter(t => t >= 1 && t <= 11).length; }
+  const seenOf = b => new Set(ls.get(lsKey(b, 'seen'), []));
+  const bestOf = b => ls.get(lsKey(b, 'best'), 0) | 0;
+  function isFound(b, t) { return unlockAll() || seenOf(b).has(t); }
+  function foundIn(b) { return unlockAll() ? 11 : [...seenOf(b)].filter(t => t >= 1 && t <= 11).length; }
+  function foundCount() { let n = 0; for (let b = 0; b < D.length; b++) n += foundIn(b); return n; }
+  // progression: Forest is always open; reaching the final tier (11) in a biome unlocks the next one. "Unlock all" opens everything.
+  function unlockedB(b) { return b === 0 || unlockAll() || seenOf(b - 1).has(11); }
 
   // ---------- toast ----------
   let toastT;
@@ -60,16 +66,17 @@
   $('s-close').addEventListener('click', () => { $('settings').classList.add('hidden'); });
   const swU = $('s-unlockall');
   function syncUnlock() { const on = unlockAll(); swU.classList.toggle('on', on); swU.setAttribute('aria-checked', on); }
-  swU.addEventListener('click', () => { ls.set(LS_UNLOCK, !unlockAll()); syncUnlock(); if (cur === 'zoo') renderBook(); if (cur === 'map') refreshPanel(); });
+  swU.addEventListener('click', () => { ls.set(LS_UNLOCK, !unlockAll()); syncUnlock(); if (cur === 'zoo') renderBook(); if (cur === 'map') { placeMap(); refreshPanel(); } if (cur === 'scores') renderScores(); });
   syncUnlock();
 
   // ---------- one animation loop for the decorative screens ----------
-  let t0 = performance.now();
+  let t0 = performance.now(), lastS = 0;
   function loop(t) {
     requestAnimationFrame(loop);                       // schedule first so one bad frame can never stop the loop
     const s = Math.max(0, (t - t0) / 1000);            // the first rAF stamp can precede t0 (negative time broke the bird frame)
-    if (cur === 'title') drawTitle(s);
-    else if (cur === 'map') drawForestIsland(s);
+    const dt = Math.min(0.1, Math.max(0, s - lastS)); lastS = s;
+    if (cur === 'title') { if (!document.hidden) TA.clock += dt; titleTick(); drawTitle(s); }
+    else if (cur === 'map') drawIslands(s);
   }
 
   // ---------- helpers ----------
@@ -148,6 +155,88 @@
     drawBird(g, Math.round(bx / P) * P, Math.round(by / P) * P, Math.floor(t * 5) % 2, P, '#3b1d0c');
     const ph2 = ((t + 7) % 22) / 22, bx2 = W + 20 - ph2 * (W + 50), by2 = H * 0.15 + Math.sin(t * 1.3 + 1) * 4;
     drawBird(g, Math.round(bx2), Math.round(by2), Math.floor(t * 4 + 1) % 2, 1, 'rgba(70,35,14,.8)');
+    drawCritters(g);
+  }
+  // ---------- title interactions (pixel sprites over the backdrop; coordinates in title-bg source px) ----------
+  // Penguin: a tap = a ~0.6 s waddle; more than 5 taps inside 2 s = he tips over backwards, bounces, lies feet-up, and gets
+  // up again after ~1.5 s (taps ignored meanwhile). Bear: waves 5 s after the app opens, then every 15 s while the title is
+  // shown. Monkey: a tap raises a banana over his head and lowers it (~1.5 s; taps ignored while it plays). TA.clock only runs
+  // while the title is visible, so nothing jumps when you come back to it.
+  const penIm = img('img/title-penguin.png'), penPlate = img('img/title-penguin-plate.png'), bearArm = img('img/title-bear-arm.png'), monkArm = img('img/title-monkey-banana.png');
+  const HIT = { penguin: [484, 655, 92, 140], bear: [604, 494, 116, 160], monkey: [30, 552, 96, 100] };
+  const PEN = { x: 486, y: 660, w: 88, h: 130, foot: [531, 783], heel: [566, 783], plate: [482, 656] };
+  const WADDLE = 0.6, FALL = { tip: 0.45, bounce: 0.35, lie: 1.5, up: 0.5 }, FALL_T = 2.8, BEAR_FIRST = 5, BEAR_EVERY = 15, BEAR_DUR = 1.5, MONK_DUR = 1.5;
+  const TA = { clock: 0, pen: { mode: 'idle', t0: 0, taps: [], falls: 0, waddles: 0 }, bear: { wave: false, t0: 0, next: BEAR_FIRST, waves: 0 }, monk: { mode: 'idle', t0: 0, raises: 0, ignored: 0 } };
+  function titleTick() {
+    const c = TA.clock, p = TA.pen, b = TA.bear, m = TA.monk;
+    if (p.mode === 'waddle' && c - p.t0 >= WADDLE) p.mode = 'idle';
+    if (p.mode === 'fall' && c - p.t0 >= FALL_T) p.mode = 'idle';
+    if (b.wave && c - b.t0 >= BEAR_DUR) b.wave = false;
+    if (!b.wave && c >= b.next) { b.wave = true; b.t0 = c; b.next = c + BEAR_EVERY; b.waves++; }
+    if (m.mode === 'up' && c - m.t0 >= MONK_DUR) m.mode = 'idle';
+  }
+  function tapPenguin() {
+    const p = TA.pen, c = TA.clock;
+    if (p.mode === 'fall') return false;
+    p.taps = p.taps.filter(x => c - x < 2); p.taps.push(c);
+    if (p.taps.length > 5) { p.mode = 'fall'; p.t0 = c; p.taps = []; p.falls++; }
+    else { p.mode = 'waddle'; p.t0 = c; p.waddles++; }
+    return true;
+  }
+  function tapMonkey() { const m = TA.monk; if (m.mode !== 'idle') { m.ignored++; return false; } m.mode = 'up'; m.t0 = TA.clock; m.raises++; return true; }
+  function hitAt(x, y) {
+    if (!tl) return null; const sx = (x - tl.x0) / tl.s, sy = y / tl.s;
+    for (const k in HIT) { const [hx, hy, hw, hh] = HIT[k]; if (sx >= hx && sx < hx + hw && sy >= hy && sy < hy + hh) return k; }
+    return null;
+  }
+  function hitRect(k) { const [hx, hy, hw, hh] = HIT[k]; return tl ? { x: tl.x0 + hx * tl.s, y: hy * tl.s, w: hw * tl.s, h: hh * tl.s } : null; }
+  $('title-cv').addEventListener('pointerdown', e => {
+    if (cur !== 'title') return; const k = hitAt(e.clientX, e.clientY);
+    if (k === 'penguin') tapPenguin(); else if (k === 'monkey') tapMonkey();
+  });
+  const ease = q => q < 0 ? 0 : q > 1 ? 1 : q * q * (3 - 2 * q);
+  function penPose() {                                    // {ang, piv:[x,y], dx, dy} of the penguin sprite, or null at rest
+    const p = TA.pen, e = TA.clock - p.t0;
+    if (p.mode === 'waddle') { const q = e / WADDLE; return { ang: Math.sin(q * Math.PI * 4) * 0.11 * (1 - q * 0.4), piv: PEN.foot, dx: Math.round(Math.sin(q * Math.PI * 2) * 3), dy: -Math.round(Math.abs(Math.sin(q * Math.PI * 4)) * 2) }; }
+    if (p.mode === 'fall') {
+      const A = 1.75, f = FALL; let ang, dy = 0;
+      if (e < f.tip) { const q = e / f.tip; ang = A * q * q; }
+      else if (e < f.tip + f.bounce) { const q = (e - f.tip) / f.bounce; dy = -Math.round(Math.sin(Math.PI * q) * 9); ang = A - 0.16 * Math.sin(Math.PI * q); }
+      else if (e < f.tip + f.bounce + f.lie) { const q = (e - f.tip - f.bounce) / f.lie; ang = A + Math.sin(q * Math.PI * 6) * 0.03 * (1 - q); }
+      else { const q = ease((e - f.tip - f.bounce - f.lie) / f.up); ang = A * (1 - q); dy = -Math.round(Math.sin(Math.PI * q) * 6); }
+      return { ang, piv: PEN.heel, dx: 0, dy };
+    }
+    return null;
+  }
+  function drawCritters(g) {
+    if (!tl) return;
+    g.save(); g.setTransform(dpr * tl.s, 0, 0, dpr * tl.s, dpr * tl.x0, 0); g.imageSmoothingEnabled = true; g.imageSmoothingQuality = 'high';
+    // monkey: banana arm slides up from behind the TICKETS sign (clipped at the sign top), shaft stretches down to it
+    const m = TA.monk;
+    if (m.mode === 'up' && ready(monkArm)) {
+      const q = (TA.clock - m.t0) / MONK_DUR, r = q < 0.25 ? ease(q / 0.25) : q < 0.72 ? 1 : ease((1 - q) / 0.28);
+      const top = Math.round(621 - r * 85), wig = q > 0.25 && q < 0.72 ? Math.round(Math.sin((q - 0.25) * Math.PI * 6) * 2) : 0, x = 96 + wig;
+      g.save(); g.beginPath(); g.rect(80, 400, 70, 219); g.clip();
+      g.drawImage(monkArm, x, top);
+      if (top + 58 < 619) g.drawImage(monkArm, 0, 57, 30, 1, x, top + 57.5, 30, 619 - (top + 57.5) + 1);
+      g.restore();
+    }
+    // bear: the free paw rises from his shoulder and waves side to side
+    const b = TA.bear;
+    if (b.wave && ready(bearArm)) {
+      const q = (TA.clock - b.t0) / BEAR_DUR, env = Math.min(1, q / 0.16, (1 - q) / 0.16);
+      g.save(); g.beginPath(); g.rect(560, 380, 120, 238); g.clip();
+      g.translate(612, 618 + Math.round((1 - env) * 46)); g.rotate(Math.sin(q * Math.PI * 2 * 2.5) * 0.38 * env);
+      g.drawImage(bearArm, -11, -46); g.restore();
+    }
+    // penguin: while animating, the patch over his painted body is drawn first, then the sprite
+    const pp = penPose();
+    if (pp && ready(penIm) && ready(penPlate)) {
+      g.drawImage(penPlate, PEN.plate[0], PEN.plate[1]);
+      g.save(); g.translate(pp.piv[0] + pp.dx, pp.piv[1] + pp.dy); g.rotate(pp.ang);
+      g.drawImage(penIm, PEN.x - pp.piv[0], PEN.y - pp.piv[1]); g.restore();
+    }
+    g.restore();
   }
   const tms = [...document.querySelectorAll('#title-menu .tm')];
   const selTm = b => tms.forEach(x => x.classList.toggle('sel', x === b));
@@ -161,22 +250,35 @@
   // =====================================================================================
   // MAP
   // =====================================================================================
-  const islForest = img('img/island-forest.png'), islRac = img('img/island-forest-raccoon.png'), islLocked = img('img/island-locked.png');
-  const RAC = { x: 110, y: 133 };                  // raccoon layer offset inside island-forest.png
-  const FOREST_GROUND = 186;                        // rows above this are tree canopy (sway); below is the island (still)
-  let mapL = null, selected = -1, selT = 0, islCv = null, islSrc = null;
+  // islands: base art + the biome animal drawn separately (hops when selected); sway groups = canopy/plant rects that shift by
+  // whole source pixels, more at the top, never below their ground row. mode c = cleared then redrawn shifted, o = drawn over,
+  // f = flag (columns wave up/down). an = animal offset, icon = the tier shown in the panel (the island's animal).
+  const ISL = [
+    { k: 'forest', sz: [415, 464], an: [110, 133], icon: 6, sway: [{ m: 'c', r: [[0, 0, 415, 186]] }] },
+    { k: 'ocean', sz: [415, 470], an: [137, 162], icon: 4, sway: [{ m: 'c', r: [[20, 0, 212, 205]] }, { m: 'c', r: [[218, 15, 380, 210]] }] },
+    { k: 'farm', sz: [415, 424], an: [155, 128], icon: 8, sway: [{ m: 'o', r: [[44, 130, 82, 178]] }, { m: 'o', r: [[104, 170, 142, 215]] }, { m: 'o', r: [[258, 165, 362, 210]] }] },
+    { k: 'arctic', sz: [415, 485], an: [142, 128], icon: 7, sway: [{ m: 'c', r: [[45, 0, 178, 225]] }, { m: 'c', r: [[238, 0, 372, 225]] }] },
+    { k: 'oriental', sz: [415, 472], an: [163, 137], icon: 10, sway: [{ m: 'c', r: [[205, 8, 378, 190]] }, { m: 'c', r: [[15, 120, 68, 225]] }, { m: 'c', r: [[335, 125, 395, 230]] }] },
+    { k: 'savannah', sz: [415, 453], an: [133, 112], icon: 10, sway: [{ m: 'c', r: [[15, 0, 255, 98], [15, 98, 180, 175]] }, { m: 'c', r: [[248, 65, 375, 170]] }] },
+    { k: 'jurassic', sz: [415, 465], an: [149, 150], icon: 7, sway: [{ m: 'c', r: [[50, 0, 200, 100], [95, 100, 140, 215]] }, { m: 'c', r: [[245, 15, 375, 120], [270, 120, 320, 215]] }] },
+    { k: 'space', sz: [415, 462], an: [146, 115], icon: 1, sway: [{ m: 'f', r: [[101, 60, 160, 95]] }] },
+  ];
+  ISL.forEach(o => { o.base = img('img/island-' + o.k + '.png'); o.ani = img(o.k === 'forest' ? 'img/island-forest-raccoon.png' : 'img/island-' + o.k + '-animal.png');
+    o.sway.forEach(gp => { gp.top = Math.min(...gp.r.map(r => r[1])); gp.g = Math.max(...gp.r.map(r => r[3])); }); });
+  const islLocked = img('img/island-locked.png');
+  let mapL = null, selected = -1, selT = 0, islCv = [], islSrc = [];
   function mapLayout() {
     const top = 60 * u + st, panelTop = H - sb - 12 * u - 94 * u;
     const A = 7 * u, hw = 18 * u, cliff = 12 * u, E = A + hw + cliff + 4;
     const iw = 98 * u, gap = 8 * u, sw = 64 * u, sh = sw / 1.215, sg = 4 * u;
-    const fh = iw * (islForest.naturalHeight || 464) / (islForest.naturalWidth || 415), lh = iw * (islLocked.naturalHeight || 355) / (islLocked.naturalWidth || 426);
+    const fh = iw * ISL[0].sz[1] / ISL[0].sz[0], lh = iw * 355 / 426;
     const y0 = top + 18 * u + 0.6 * fh, y7 = panelTop - 10 * u - lh * 0.5, step = (y7 - y0) / 7;
     const cx = W / 2, rows = [];
     for (let i = 0; i < 8; i++) {
       const left = i % 2 === 0, y = y0 + i * step;
       const icx = left ? cx - E - gap - iw / 2 : cx + E + gap + iw / 2;
       const scx = left ? icx - iw / 2 - sg - sw / 2 : icx + iw / 2 + sg + sw / 2;
-      const h = i === 0 ? fh : lh, anchor = i === 0 ? 0.6 : 0.5;
+      const un = unlockedB(i), h = un ? iw * ISL[i].sz[1] / ISL[i].sz[0] : lh, anchor = un ? 0.6 : 0.5;
       rows.push({ i, left, y, island: { x: icx - iw / 2, y: y - anchor * h, w: iw, h }, sign: { x: scx - sw / 2, y: y - sh / 2, w: sw, h: sh } });
     }
     return { top, panelTop, A, hw, cliff, E, cx, y0, step, rows, S: E + gap + 2 * u - hw, pathTop: y0 - step * 0.1, pathBot: panelTop + 30 };
@@ -263,13 +365,13 @@
   }
   function placeMap() {
     mapL = mapLayout(); drawMapBg();
-    const box = $('map-items'); box.innerHTML = '';
+    const box = $('map-items'); box.innerHTML = ''; islCv = []; islSrc = [];
     mapL.rows.forEach(r => {
-      const b = r.i, unlocked = b === 0;
+      const b = r.i, unlocked = unlockedB(b);
       const isl = document.createElement('div'); isl.className = 'isl' + (unlocked ? '' : ' locked'); isl.dataset.biome = b; isl.setAttribute('role', 'button'); isl.setAttribute('aria-label', D[b].name + (unlocked ? '' : ' (locked)'));
       Object.assign(isl.style, { left: r.island.x + 'px', top: r.island.y + 'px', width: r.island.w + 'px', height: r.island.h + 'px' });
-      if (unlocked) { const hc = document.createElement('canvas'); hc.className = 'halo'; isl.appendChild(hc); buildHalo(hc, r.island.w, r.island.h);
-        islCv = document.createElement('canvas'); islCv.className = 'art'; isl.appendChild(islCv); fitCanvas(islCv, r.island.w, r.island.h); isl.id = 'isl-forest'; }
+      if (unlocked) { const hc = document.createElement('canvas'); hc.className = 'halo'; isl.appendChild(hc); buildHalo(hc, r.island.w, r.island.h, b);
+        const cv = document.createElement('canvas'); cv.className = 'art'; isl.appendChild(cv); fitCanvas(cv, r.island.w, r.island.h); islCv[b] = cv; isl.id = 'isl-' + ISL[b].k; }
       else { const im = document.createElement('img'); im.src = islLocked.src; im.alt = 'Locked'; isl.appendChild(im); }
       const sg = document.createElement('div'); sg.dataset.biome = b;
       Object.assign(sg.style, { left: r.sign.x + 'px', top: r.sign.y + 'px', width: r.sign.w + 'px', height: r.sign.h + 'px' });
@@ -278,13 +380,14 @@
       const tap = () => tapIsland(b, isl);
       isl.addEventListener('click', tap); sg.addEventListener('click', tap);
       box.appendChild(isl); box.appendChild(sg);
-      if (b === 0 && selected === 0) isl.classList.add('sel');
+      if (unlocked && selected === b) isl.classList.add('sel');
     });
   }
   // Selection halo: a chunky pixel-art gold outline that hugs the island's silhouette (trees + rock), fading outward
   // through dithered rings. Built once per layout from the island art's alpha; CSS only pulses its opacity (cheap on iOS).
-  function buildHalo(cv, w, h) {
-    if (!ready(islForest) || !ready(islRac)) { islForest.addEventListener('load', () => buildHalo(cv, w, h), { once: true }); islRac.addEventListener('load', () => buildHalo(cv, w, h), { once: true }); return; }
+  function buildHalo(cv, w, h, b) {
+    const I = ISL[b], islForest = I.base, islRac = I.ani, RAC = { x: I.an[0], y: I.an[1] }, FOREST_GROUND = Math.max(...I.sway.map(gp => gp.g));
+    if (!ready(islForest) || !ready(islRac)) { islForest.addEventListener('load', () => buildHalo(cv, w, h, b), { once: true }); islRac.addEventListener('load', () => buildHalo(cv, w, h, b), { once: true }); return; }
     const q = Math.max(2, Math.round(2.4 * u)), R = 7, pad = R * q;            // q = CSS px per halo pixel
     const gw = Math.ceil(w / q) + 2 * R, gh = Math.ceil(h / q) + 2 * R;
     const sw = islForest.naturalWidth, sh = islForest.naturalHeight;
@@ -308,45 +411,59 @@
     for (let i = 0; i < N; i++) if (dist[i] === 0) { const x = i % gw, y = (i / gw) | 0; g.fillStyle = 'rgba(255,214,90,.55)'; g.fillRect(x, y, 1, 1); }
   }
   function tapIsland(b, el) {
-    if (b !== 0) { el.classList.remove('shake'); void el.offsetWidth; el.classList.add('shake'); toast('LOCKED'); return; }
-    if (selected !== 0) { selected = 0; selT = performance.now(); }
-    el.classList.add('sel'); refreshPanel();
+    if (!unlockedB(b)) { el.classList.remove('shake'); void el.offsetWidth; el.classList.add('shake'); toast(b > 0 ? 'REACH TIER 11 IN ' + D[b - 1].name.toUpperCase() : 'LOCKED'); return; }
+    if (selected !== b) { selected = b; selT = performance.now(); }
+    document.querySelectorAll('#map-items .isl').forEach(x => x.classList.toggle('sel', x === el));
+    refreshPanel();
   }
   function refreshPanel() {
-    const on = selected === 0;
+    const b = selected, on = b >= 0 && unlockedB(b);
     $('mp-empty').classList.toggle('hidden', on); $('mp-sel').classList.toggle('hidden', !on);
     if (on) {
-      $('mp-best').textContent = (ls.get(LS_BEST, 0) | 0).toLocaleString('en-US');
-      $('mp-found').textContent = (unlockAll() ? 11 : [...forestSeen()].length) + '/11';
-      Art.draw($('mp-icon'), 0, 6, 64 * u); $('mp-play').classList.add('pulse');
+      $('mp-name').textContent = D[b].name.toUpperCase();
+      $('mp-best').textContent = bestOf(b).toLocaleString('en-US');
+      $('mp-found').textContent = foundIn(b) + '/11';
+      Art.draw($('mp-icon'), b, ISL[b].icon, 64 * u); $('mp-play').classList.add('pulse');
     }
   }
-  $('mp-play').addEventListener('click', () => { selected = -1; show('game', 'new'); });
-  // Forest island: trees sway (whole rows of canopy shift by whole source pixels), raccoon hops; the island itself never moves.
-  function drawForestIsland(t) {
-    if (!islCv || !ready(islForest) || !ready(islRac)) return;
-    const sw = islForest.naturalWidth, sh = islForest.naturalHeight;
-    if (!islSrc) { islSrc = document.createElement('canvas'); islSrc.width = sw; islSrc.height = sh; }
-    const s = islSrc.getContext('2d'); s.clearRect(0, 0, sw, sh);
-    const on = selected === 0, ts = on ? (performance.now() - selT) / 1000 : 0;
-    const amp = on ? 3.2 : 1.0, sway = Math.sin(t * (on ? 2.6 : 1.4));
-    const band = 6;
-    for (let y = 0; y < FOREST_GROUND; y += band) {
-      const k = Math.pow((FOREST_GROUND - y) / FOREST_GROUND, 1.25), dx = Math.round(amp * sway * k);
-      const hh = Math.min(band, FOREST_GROUND - y);
-      s.drawImage(islForest, 0, y, sw, hh, dx, y, sw, hh);
-    }
-    s.drawImage(islForest, 0, FOREST_GROUND, sw, sh - FOREST_GROUND, 0, FOREST_GROUND, sw, sh - FOREST_GROUND);
-    // raccoon: idle breathing; when selected, a hop every 1.1 s with a little tilt
+  $('mp-play').addEventListener('click', () => { const b = selected; if (b < 0 || !unlockedB(b)) return; selected = -1; show('game', { mode: 'new', biome: b }); });
+  // Islands: plants sway (rows of canopy shift by whole source pixels), the animal hops when its island is selected; the rock never moves.
+  function drawIslands(t) { for (let b = 0; b < ISL.length; b++) if (islCv[b]) drawIsland(b, t); }
+  function drawIsland(b, t) {
+    const I = ISL[b], base = I.base, ani = I.ani, cv = islCv[b];
+    if (!cv || !ready(base) || !ready(ani)) return;
+    const sw = base.naturalWidth, sh = base.naturalHeight;
+    if (!islSrc[b]) { islSrc[b] = document.createElement('canvas'); islSrc[b].width = sw; islSrc[b].height = sh; }
+    const s = islSrc[b].getContext('2d'); s.clearRect(0, 0, sw, sh);
+    const on = selected === b, ts = on ? (performance.now() - selT) / 1000 : 0;
+    const amp = on ? 3.2 : 1.0, band = 6;
+    s.drawImage(base, 0, 0);
+    I.sway.forEach((gp, gi) => {
+      const sway = Math.sin(t * (on ? 2.6 : 1.4) + gi * 1.3 + b * 0.7);
+      if (gp.m === 'f') {                                  // flag: columns ripple, the pole side stays put
+        const [x0, y0, x1, y1] = gp.r[0]; s.clearRect(x0 + 2, y0, x1 - x0 - 2, y1 - y0);
+        for (let x = x0 + 2; x < x1; x += 2) { const k = (x - x0) / (x1 - x0), dy = Math.round(Math.sin(t * (on ? 6 : 3) - (x - x0) * 0.22) * (on ? 3 : 1.5) * k);
+          s.drawImage(base, x, y0, 2, y1 - y0, x, y0 + dy, 2, y1 - y0); }
+        return;
+      }
+      if (gp.m === 'c') gp.r.forEach(([x0, y0, x1, y1]) => s.clearRect(x0, y0, x1 - x0, y1 - y0));
+      gp.r.forEach(([x0, y0, x1, y1]) => {
+        for (let y = y0; y < y1; y += band) {
+          const k = Math.pow((gp.g - y) / Math.max(1, gp.g - gp.top), 1.25), dx = Math.round(amp * sway * k), hh = Math.min(band, y1 - y);
+          s.drawImage(base, x0, y, x1 - x0, hh, x0 + dx, y, x1 - x0, hh);
+        }
+      });
+    });
+    // animal: when selected, a hop every 1.1 s with a little tilt
     let hop = 0, tilt = 0, sq = 1;
     if (on) { const p = (ts % 1.1) / 1.1; if (p < 0.42) { const q = p / 0.42; hop = Math.sin(Math.PI * q) * 14; tilt = Math.sin(Math.PI * 2 * q) * 0.09; } else if (p < 0.52) sq = 1 - 0.06 * Math.sin(Math.PI * (p - 0.42) / 0.1); }
-    const rw = islRac.naturalWidth, rh = islRac.naturalHeight, fx = RAC.x + rw / 2, fy = RAC.y + rh;
-    s.save(); s.fillStyle = 'rgba(20,30,10,' + (0.28 - hop * 0.008).toFixed(3) + ')';
-    s.beginPath(); s.ellipse(fx, fy - 6, rw * (0.36 - hop * 0.006), 7, 0, 0, 7); s.fill(); s.restore();
+    const rw = ani.naturalWidth, rh = ani.naturalHeight, fx = I.an[0] + rw / 2, fy = I.an[1] + rh;
+    if (b === 0 || on) { s.save(); s.fillStyle = 'rgba(20,30,10,' + (0.28 - hop * 0.008).toFixed(3) + ')';
+      s.beginPath(); s.ellipse(fx, fy - 6, rw * (0.36 - hop * 0.006), 7, 0, 0, 7); s.fill(); s.restore(); }
     s.save(); s.translate(fx, fy - Math.round(hop)); s.rotate(tilt); s.scale(1 / sq * (sq < 1 ? 1.02 : 1), sq);
-    s.drawImage(islRac, -rw / 2, -rh); s.restore();
-    const g = islCv.getContext('2d'); g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, islCv.width, islCv.height);
-    g.imageSmoothingEnabled = true; g.imageSmoothingQuality = 'high'; g.drawImage(islSrc, 0, 0, islCv.width, islCv.height);
+    s.drawImage(ani, -rw / 2, -rh); s.restore();
+    const g = cv.getContext('2d'); g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, cv.width, cv.height);
+    g.imageSmoothingEnabled = true; g.imageSmoothingQuality = 'high'; g.drawImage(islSrc[b], 0, 0, cv.width, cv.height);
   }
   hooks.map = {
     enter() { selected = -1; placeMap(); refreshPanel(); },
@@ -736,33 +853,38 @@
     drawWood($('scores-cv'));
     const list = $('score-list'); list.style.top = (76 * u + st) + 'px'; list.style.bottom = (20 * u + sb) + 'px'; list.innerHTML = '';
     D.forEach((b, i) => {
-      const row = document.createElement('div'); row.className = 'srow' + (i === 0 ? '' : ' locked'); row.dataset.biome = b.key;
+      const un = unlockedB(i), row = document.createElement('div'); row.className = 'srow' + (un ? '' : ' locked'); row.dataset.biome = b.key;
       const sg = document.createElement('div'); sg.className = 'sg';
-      if (i === 0) sg.innerHTML = '<img src="' + SIGN[i] + '" alt="' + b.name + '">';
+      if (un) sg.innerHTML = '<img src="' + SIGN[i] + '" alt="' + b.name + '">';
       else sg.innerHTML = '<div class="lsign">' + LOCK_SVG + '</div>';
       const v = document.createElement('div'); v.className = 'sv';
-      const best = ls.get(LS_BEST, 0) | 0;
+      const best = bestOf(i);
       const nmEl = document.createElement('div'); nmEl.className = 'sn';
-      nmEl.innerHTML = '<b>' + b.name + '</b><small>' + (i === 0 ? 'BEST SCORE' : 'LOCKED') + '</small>';
-      v.innerHTML = i === 0 ? '<b>' + best.toLocaleString('en-US') + '</b>' : '<b>—</b>';
+      nmEl.innerHTML = '<b>' + b.name + '</b><small>' + (un ? 'BEST SCORE' : 'LOCKED') + '</small>';
+      v.innerHTML = un ? '<b>' + best.toLocaleString('en-US') + '</b>' : '<b>—</b>';
       row.appendChild(sg); row.appendChild(nmEl); row.appendChild(v); list.appendChild(row);
     });
   }
   hooks.scores = { enter: renderScores, back() { show('title'); } };
 
   // =====================================================================================
-  hooks.game = { enter(mode) { window.ZMGame.enter(mode || 'new'); } };
+  hooks.game = { enter(o) { if (o && typeof o === 'object') window.ZMGame.enter(o.mode || 'new', o.biome); else window.ZMGame.enter(o || 'new'); } };
   let rzT;
   addEventListener('resize', () => { clearTimeout(rzT); rzT = setTimeout(() => {
-    measure(); titleBg = null; islSrc = null;
+    measure(); titleBg = null; islSrc = [];
     if (cur === 'title') buildTitle(); else if (cur === 'map') { placeMap(); refreshPanel(); } else if (cur === 'zoo') { zooLayout(); renderBook(); } else if (cur === 'scores') renderScores();
     if (popOpen) openPopup(popB, popT);
   }, 140); });
 
-  window.ZMUI = { go: show, openZoo, toast, get screen() { return cur; }, openPopup, closePopup, get popupOpen() { return popOpen; }, isFound, foundCount, get flipping() { return flipping; }, get spread() { return zb; }, flipTo: b => flipTo(b) };
-  const routeOf = () => ({ '#play': 'game', '#map': 'map', '#zoo': 'zoo', '#zoopedia': 'zoo', '#scores': 'scores' }[location.hash] || 'title');
+  window.ZMUI = { go: show, openZoo, toast, get screen() { return cur; }, openPopup, closePopup, get popupOpen() { return popOpen; }, isFound, foundCount, get flipping() { return flipping; }, get spread() { return zb; }, flipTo: b => flipTo(b),
+    unlocked: unlockedB, foundIn, get mapSelected() { return selected; }, get mapLayout() { return mapL; },
+    title: { get clock() { return TA.clock; }, get penguin() { return { mode: TA.pen.mode, taps: TA.pen.taps.length, falls: TA.pen.falls, waddles: TA.pen.waddles, pose: penPose() }; },
+      get bear() { return Object.assign({}, TA.bear); }, get monkey() { return Object.assign({}, TA.monk); }, hitRect, hitAt, timing: { WADDLE, FALL_T, BEAR_FIRST, BEAR_EVERY, BEAR_DUR, MONK_DUR } } };
+  // #play-<biome> (e.g. #play-ocean) starts that biome directly
+  const playOpt = () => { const m = /^#play-(\w+)$/.exec(location.hash), b = m ? D.findIndex(x => x.key === m[1] || ISL[D.indexOf(x)].k === m[1]) : 0; return { mode: 'new', biome: Math.max(0, b) }; };
+  const routeOf = () => /^#play-\w+$/.test(location.hash) ? 'game' : ({ '#play': 'game', '#map': 'map', '#zoo': 'zoo', '#zoopedia': 'zoo', '#scores': 'scores' }[location.hash] || 'title');
   const route = routeOf();
-  show(route, route === 'game' ? 'new' : undefined);
-  addEventListener('hashchange', () => { const r = routeOf(); if (r === cur) return; if (popOpen) closePopup(true); $('settings').classList.add('hidden'); if (r === 'zoo') openZoo({ from: 'title' }); else show(r, r === 'game' ? 'new' : undefined); });
+  show(route, route === 'game' ? playOpt() : undefined);
+  addEventListener('hashchange', () => { const r = routeOf(); if (r === cur) return; if (popOpen) closePopup(true); $('settings').classList.add('hidden'); if (r === 'zoo') openZoo({ from: 'title' }); else show(r, r === 'game' ? playOpt() : undefined); });
   requestAnimationFrame(loop);
 })();
