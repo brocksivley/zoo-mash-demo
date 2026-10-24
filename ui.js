@@ -1,4 +1,4 @@
-/* Zoo Mash – screens around the levels: title (+ tappable penguin / waving bear / banana monkey), biome map (8 islands,
+/* Zoo Mash – screens around the levels: title (+ tappable penguin / sleepy bear / banana monkey), biome map (8 islands,
    progression: reaching tier 11 in a biome unlocks the next one), Zoopedia (+ fun-fact popup), scores, settings.
    Pure canvas/DOM, no libraries. game.js owns the level; this file only enters/leaves it through window.ZMGame. */
 (function () {
@@ -164,20 +164,21 @@
   }
   // ---------- title interactions (pixel sprites over the backdrop; coordinates in title-bg source px) ----------
   // Penguin: a tap = a ~0.6 s waddle; more than 5 taps inside 2 s = he tips over backwards, bounces, lies feet-up, and gets
-  // up again after ~1.5 s (taps ignored meanwhile). Bear: waves 5 s after the app opens, then every 15 s while the title is
-  // shown. Monkey: a tap raises a banana over his head and lowers it (~1.5 s; taps ignored while it plays). TA.clock only runs
+  // up again after ~1.5 s (taps ignored meanwhile). Bear (v7): asleep the whole time (closed eyes + pixel Zs drifting up);
+  // a tap startles him awake (!), he yawns, gets drowsy and dozes off again 3-5 s after the tap (taps ignored while awake;
+  // no timer ever wakes him). Monkey: a tap raises a banana over his head and lowers it (~1.5 s; taps ignored while it plays). TA.clock only runs
   // while the title is visible, so nothing jumps when you come back to it.
   const penPlate = img('img/title-penguin-plate.png');
-  const HIT = { penguin: [484, 655, 92, 140], bear: [604, 494, 116, 160], monkey: [30, 552, 96, 100] };
+  const HIT = { penguin: [484, 655, 92, 140], bear: [578, 468, 142, 206], monkey: [30, 552, 96, 100] };
   const PEN = { x: 486, y: 660, w: 88, h: 130, foot: [531, 783], heel: [566, 783], plate: [482, 656] };
-  const WADDLE = 0.6, FALL = { tip: 0.45, bounce: 0.35, lie: 1.5, up: 0.5 }, FALL_T = 2.8, BEAR_FIRST = 5, BEAR_EVERY = 15, BEAR_DUR = 1.5, MONK_DUR = 1.5;
-  const TA = { clock: 0, pen: { mode: 'idle', t0: 0, taps: [], falls: 0, waddles: 0 }, bear: { wave: false, t0: 0, next: BEAR_FIRST, waves: 0 }, monk: { mode: 'idle', t0: 0, raises: 0, ignored: 0 } };
+  const WADDLE = 0.6, FALL = { tip: 0.45, bounce: 0.35, lie: 1.5, up: 0.5 }, FALL_T = 2.8, MONK_DUR = 1.5;
+  const BEAR = { startle: 1.0, yawnIn: 0.15, yawnHold: 0.8, yawnOut: 0.15, dozeMin: 3, dozeMax: 5, close: 0.4, zPeriod: 2.4, zGap: 0.8, fps: 6 };
+  const TA = { clock: 0, pen: { mode: 'idle', t0: 0, taps: [], falls: 0, waddles: 0 }, bear: { mode: 'sleep', t0: 0, sleepAt: 0, sleep0: 0, taps: 0, ignored: 0, wakes: 0 }, monk: { mode: 'idle', t0: 0, raises: 0, ignored: 0 } };
   function titleTick() {
     const c = TA.clock, p = TA.pen, b = TA.bear, m = TA.monk;
     if (p.mode === 'waddle' && c - p.t0 >= WADDLE) p.mode = 'idle';
     if (p.mode === 'fall' && c - p.t0 >= FALL_T) p.mode = 'idle';
-    if (b.wave && c - b.t0 >= BEAR_DUR) b.wave = false;
-    if (!b.wave && c >= b.next) { b.wave = true; b.t0 = c; b.next = c + BEAR_EVERY; b.waves++; }
+    if (b.mode === 'awake' && c >= b.sleepAt) { b.mode = 'sleep'; b.sleep0 = b.sleepAt; }
     if (m.mode === 'up' && c - m.t0 >= MONK_DUR) m.mode = 'idle';
   }
   function tapPenguin() {
@@ -188,6 +189,12 @@
     else { p.mode = 'waddle'; p.t0 = c; p.waddles++; }
     return true;
   }
+  // v7: a tap wakes the sleeping bear (startle -> yawn -> doze -> asleep again 3-5 s later, randomised); taps while awake are ignored
+  let bearRng = Math.random;
+  function tapBear() {
+    const b = TA.bear, c = TA.clock; if (b.mode !== 'sleep') { b.ignored++; return false; }
+    b.mode = 'awake'; b.t0 = c; b.sleepAt = c + BEAR.dozeMin + (BEAR.dozeMax - BEAR.dozeMin) * bearRng(); b.taps++; b.wakes++; return true;
+  }
   function tapMonkey() { const m = TA.monk; if (m.mode !== 'idle') { m.ignored++; return false; } m.mode = 'up'; m.t0 = TA.clock; m.raises++; return true; }
   function hitAt(x, y) {
     if (!tl) return null; const sx = (x - tl.x0) / tl.s, sy = y / tl.s;
@@ -197,15 +204,15 @@
   function hitRect(k) { const [hx, hy, hw, hh] = HIT[k]; return tl ? { x: tl.x0 + hx * tl.s, y: hy * tl.s, w: hw * tl.s, h: hh * tl.s } : null; }
   $('title-cv').addEventListener('pointerdown', e => {
     if (cur !== 'title') return; const k = hitAt(e.clientX, e.clientY);
-    if (k === 'penguin') tapPenguin(); else if (k === 'monkey') tapMonkey();
+    if (k === 'penguin') tapPenguin(); else if (k === 'monkey') tapMonkey(); else if (k === 'bear') tapBear();
   });
   // v6: every critter move is a drawn pixel frame; nothing is rotated, skewed or scaled at draw time, positions are whole
   // source px and frames step at 6-8 fps. Bear + monkey frames are opaque patches of the backdrop region they cover (the
   // critter redrawn inside it: the bear's own arm, the monkey's own arm/banana/grin), drawn 1:1 over the backdrop
   // (tools/title_patches_v6.py). Penguin frames are drawn poses on a 3-px cell (tools/title_penguin_v6.py).
-  const penSheet = img('img/title-penguin-v6.png?v=fd6'), bearSheet = img('img/title-bear-v6.png?v=fd6'), monkSheet = img('img/title-monkey-v6.png?v=fd7');
+  const penSheet = img('img/title-penguin-v6.png?v=fd6'), bearSheet = img('img/title-bear-sleep-v7.png?v=fd7s'), monkSheet = img('img/title-monkey-v6.png?v=fd7');
   const PENF = { fw: 240, fh: 156, at: [90, 138], idx: { idle: 0, wl: 1, wr: 2, flail: 3, fall: 4, lie: 5, lie2: 6, lie3: 7 } };
-  const BEARF = { w: 170, h: 170, x: 550, y: 480, idx: { mid: 0, up: 1, tiltL: 2, tiltR: 3 } };
+  const BEARF = { w: 57, h: 57, x: 620, y: 538, idx: { closed: 0, half: 1, yawn1: 2, yawn: 3 } };   // face patches (tools/title_bear_sleep_v7.py)
   const MONKF = { w: 120, h: 120, x: 30, y: 520, idx: { low: 0, mid: 1, up: 2, up2: 3 } };
   // penguin sequences: [frame, dx, dy] per step
   const WAD_SEQ = [['wl', 0, -3], ['wr', 3, 0], ['wl', 3, -3], ['wr', 0, 0], ['idle', 0, 0]];       // 8 fps, 0.6 s
@@ -228,12 +235,38 @@
     if (!st) return null;
     return { frame: st[0], dx: st[1], dy: st[2] };
   }
-  // bear: his own arm, redrawn per frame: half up -> up -> paw tilted left -> up -> paw tilted right ... -> half up (6 fps)
-  const BEAR_SEQ = ['mid', 'up', 'tiltL', 'up', 'tiltR', 'up', 'tiltL', 'up', 'mid'];
-  function bearPose() {                     // {frame, step} or null
-    const b = TA.bear; if (!b.wave) return null;
-    const k = Math.floor((TA.clock - b.t0) * 6);
-    return k < BEAR_SEQ.length ? { frame: BEAR_SEQ[k], step: k } : null;
+  // bear (v7): only his eyes (and, for the yawn, his mouth inside the muzzle) change; the patch frames are the v6 rest
+  // pixels with those few cells repainted. Zs and the '!' are 3-px-cell pixel glyphs (cream, dark outline) on the backdrop's
+  // cell phase, frame-stepped at 6 fps with stepped fades; nothing moves smoothly.
+  const ZG = { 4: ['####', '..#.', '.#..', '####'], 5: ['#####', '...#.', '..#..', '.#...', '#####'], 6: ['######', '....#.', '...#..', '..#...', '.#....', '######'] };
+  const BANG = { small: ['#', '#', '.', '#'], big: ['##', '##', '##', '..', '##'] };
+  const GLYPH = { cell: 3, fill: '#fff4d6', line: '#2a1406', z0: [647, 499], bang: [653, 499] };   // anchors = bottom-left (x = 2 mod 3, y = 1 mod 3)
+  function bearZs(age) {                  // Zs alive `age` s after he fell asleep: [{size, x, y, a, step}]
+    const out = [], fps = BEAR.fps;
+    for (let i = 0; i < 3; i++) {
+      const t = age - i * BEAR.zGap; if (t < 0) continue;            // they start one by one, then loop
+      const k = Math.floor((t % BEAR.zPeriod) * fps);                // 0..14
+      const size = k < 5 ? 4 : k < 10 ? 5 : 6;
+      out.push({ size, step: k, x: GLYPH.z0[0] + 3 * Math.floor(k * 5 / 14), y: GLYPH.z0[1] - 3 * Math.floor(k * 1.4),
+        a: k === 0 ? 0.5 : k >= 14 ? 0.25 : k >= 13 ? 0.45 : k >= 12 ? 0.7 : 1 });
+    }
+    return out;
+  }
+  function bearPose() {                     // {phase, frame (null = his open rest eyes), bang, zs}
+    const b = TA.bear, c = TA.clock, B = BEAR;
+    if (b.mode === 'sleep') return { phase: 'asleep', frame: 'closed', bang: null, zs: bearZs(c - b.sleep0) };
+    const e = c - b.t0, y0 = B.startle, y1 = y0 + B.yawnIn, y2 = y1 + B.yawnHold, y3 = y2 + B.yawnOut;
+    if (e < y0) return { phase: 'startle', frame: null, bang: e < 1 / 8 ? 'small' : e < 0.9 ? 'big' : null, bangDy: e < 1 / 8 ? 0 : e < 0.25 ? -6 : -3, zs: [] };
+    if (e < y3) return { phase: 'yawn', frame: e < y1 || e >= y2 ? 'yawn1' : 'yawn', bang: null, zs: [] };
+    return { phase: 'doze', frame: c >= b.sleepAt - B.close ? 'closed' : 'half', bang: null, zs: [] };
+  }
+  function drawGlyph(g, rows, x, y, alpha) {   // (x, y) = bottom-left in backdrop px
+    const C = GLYPH.cell, top = y - rows.length * C; g.globalAlpha = alpha;
+    g.fillStyle = GLYPH.line;
+    rows.forEach((r, j) => [...r].forEach((ch, i) => { if (ch === '#') g.fillRect(x + i * C - C, top + j * C - C, 3 * C, 3 * C); }));
+    g.fillStyle = GLYPH.fill;
+    rows.forEach((r, j) => [...r].forEach((ch, i) => { if (ch === '#') g.fillRect(x + i * C, top + j * C, C, C); }));
+    g.globalAlpha = 1;
   }
   // monkey: arm comes up from behind the TICKETS sign (8 fps), bobs the banana with a grin (6 fps), goes back down (8 fps)
   function monkPose() {                     // {frame} or null
@@ -249,7 +282,9 @@
     const mp = monkPose();
     if (mp && ready(monkSheet)) g.drawImage(monkSheet, MONKF.idx[mp.frame] * MONKF.w, 0, MONKF.w, MONKF.h, MONKF.x, MONKF.y, MONKF.w, MONKF.h);
     const bp = bearPose();
-    if (bp && ready(bearSheet)) g.drawImage(bearSheet, BEARF.idx[bp.frame] * BEARF.w, 0, BEARF.w, BEARF.h, BEARF.x, BEARF.y, BEARF.w, BEARF.h);
+    if (bp.frame && ready(bearSheet)) g.drawImage(bearSheet, BEARF.idx[bp.frame] * BEARF.w, 0, BEARF.w, BEARF.h, BEARF.x, BEARF.y, BEARF.w, BEARF.h);
+    for (const z of bp.zs) drawGlyph(g, ZG[z.size], z.x, z.y, z.a);
+    if (bp.bang) drawGlyph(g, BANG[bp.bang], GLYPH.bang[0], GLYPH.bang[1] + bp.bangDy, 1);
     // penguin: while animating, the patch over his painted body is drawn first, then the pose frame
     const pp = penPose();
     if (pp && ready(penSheet) && ready(penPlate)) {
@@ -293,7 +328,9 @@
     const A = 7 * u, hw = 18 * u, cliff = 12 * u, E = A + hw + cliff + 4;
     const iw = 98 * u, gap = 8 * u, sw = 64 * u, sh = sw / 1.215, sg = 4 * u;
     const fh = iw * ISL[0].sz[1] / ISL[0].sz[0], lh = iw * 355 / 426;
-    const y0 = top + 18 * u + 0.6 * fh, y7 = panelTop - 10 * u - lh * 0.5, step = (y7 - y0) / 7;
+    // v7: the island column is compressed vertically by 18% and centred in the room between the header and the bottom panel
+    const Y0 = top + 18 * u + 0.6 * fh, Y7 = panelTop - 10 * u - lh * 0.5, MAP_SQ = 0.82;
+    const ym = (Y0 + Y7) / 2, half = (Y7 - Y0) / 2 * MAP_SQ, y0 = ym - half, step = 2 * half / 7;
     const cx = W / 2, rows = [];
     for (let i = 0; i < 8; i++) {
       const left = i % 2 === 0, y = y0 + i * step;
@@ -302,7 +339,7 @@
       const un = unlockedB(i), h = un ? iw * ISL[i].sz[1] / ISL[i].sz[0] : lh, anchor = un ? 0.6 : 0.5;
       rows.push({ i, left, y, island: { x: icx - iw / 2, y: y - anchor * h, w: iw, h }, sign: { x: scx - sw / 2, y: y - sh / 2, w: sw, h: sh } });
     }
-    return { top, panelTop, A, hw, cliff, E, cx, y0, step, rows, S: E + gap + 2 * u - hw, pathTop: y0 - step * 0.1, pathBot: panelTop + 30 };
+    return { top, panelTop, A, hw, cliff, E, cx, y0, step, rows, squeeze: MAP_SQ, span0: Y7 - Y0, S: E + gap + 2 * u - hw, pathTop: y0 - step * 0.1, pathBot: panelTop + 30 };
   }
   // pixel-art sky, clouds and the chunky 3D cliff-edge path (1 canvas px = 2 CSS px)
   function drawMapBg() {
@@ -388,7 +425,7 @@
     mapL = mapLayout(); drawMapBg();
     const box = $('map-items'); box.innerHTML = ''; islCv = []; islSrc = [];
     mapL.rows.forEach(r => {
-      const b = r.i, unlocked = unlockedB(b);
+      const b = r.i, unlocked = mapUnl(b);
       const isl = document.createElement('div'); isl.className = 'isl' + (unlocked ? '' : ' locked'); isl.dataset.biome = b; isl.setAttribute('role', 'button'); isl.setAttribute('aria-label', D[b].name + (unlocked ? '' : ' (locked)'));
       Object.assign(isl.style, { left: r.island.x + 'px', top: r.island.y + 'px', width: r.island.w + 'px', height: r.island.h + 'px' });
       if (unlocked) { const hc = document.createElement('canvas'); hc.className = 'halo'; isl.appendChild(hc); buildHalo(hc, r.island.w, r.island.h, b);
@@ -432,6 +469,7 @@
     for (let i = 0; i < N; i++) if (dist[i] === 0) { const x = i % gw, y = (i / gw) | 0; g.fillStyle = 'rgba(255,214,90,.55)'; g.fillRect(x, y, 1, 1); }
   }
   function tapIsland(b, el) {
+    if (ua) return;                                                     // v7: ignore taps while the unlock animation runs
     if (!unlockedB(b)) { el.classList.remove('shake'); void el.offsetWidth; el.classList.add('shake'); toast(b > 0 ? 'REACH TIER 11 IN ' + D[b - 1].name.toUpperCase() : 'LOCKED'); return; }
     if (selected !== b) { selected = b; selT = performance.now(); }
     document.querySelectorAll('#map-items .isl').forEach(x => x.classList.toggle('sel', x === el));
@@ -486,8 +524,78 @@
     const g = cv.getContext('2d'); g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, cv.width, cv.height);
     g.imageSmoothingEnabled = true; g.imageSmoothingQuality = 'high'; g.drawImage(islSrc[b], 0, 0, cv.width, cv.height);
   }
+  // ---- v7 map unlock animation (after BIOME COMPLETE! -> NEXT BIOME). Frame-based at 12 fps, chunky pixels:
+  // lock shakes (stepped) -> pops into grey chunks + gold sparkles -> island appears with its halo lighting up ->
+  // camera focuses the island -> it becomes the selected island (PLAY ready).
+  const UA_FPS = 12, UA = { shake: [4, 13], pop: 14, sparkEnd: 30, focus: [18, 30], select: 32, end: 40 };
+  let ua = null; const uaLog = [];
+  function mapUnl(b) { return unlockedB(b) && !(ua && ua.b === b && ua.f < UA.pop); }
+  function startUnlock(b, manual) {
+    stopUnlock(); ua = { b, f: -1, manual: !!manual, t0: performance.now(), iv: 0, spark: null }; uaLog.push({ b, t: Date.now() });
+    selected = -1; placeMap(); refreshPanel();
+    const tick = () => { if (!ua) return; const f = Math.floor((performance.now() - ua.t0) / 1000 * UA_FPS); while (ua && ua.f < f) uaStep(); };
+    if (!manual) ua.iv = setInterval(tick, 1000 / UA_FPS / 2);
+    uaStep();
+  }
+  function stopUnlock() { if (!ua) return; clearInterval(ua.iv); if (ua.spark) ua.spark.remove(); camera(0, 0, 1); ua = null; }
+  function camera(dx, dy, sc) { [$('map-cv'), $('map-items')].forEach(e => { e.style.transformOrigin = '0 0'; e.style.transform = sc === 1 && !dx && !dy ? '' : `translate(${dx}px,${dy}px) scale(${sc})`; }); }
+  function uaStep() {
+    const f = ++ua.f, b = ua.b, row = mapL && mapL.rows.find(r => r.i === b); if (!row) { stopUnlock(); return; }
+    const isl = document.querySelector(`#map-items .isl[data-biome="${b}"]`), sg = document.querySelector(`#map-items [data-biome="${b}"]:not(.isl)`);
+    const q = Math.max(2, Math.round(3 * u));                                 // CSS px per fx pixel
+    if (f >= UA.shake[0] && f <= UA.shake[1] && isl) {                       // stepped shake, whole fx pixels, growing then settling
+      const k = f - UA.shake[0], dx = [0, -1, 1, -2, 2, -2, 2, -1, 1, 0][k] * q, dy = [0, 0, -1, 0, -1, 0, -1, 0, 0, 0][k] * q;
+      [isl, sg].forEach(e => e && (e.style.transform = `translate(${dx}px,${dy}px)`));
+    }
+    if (f === UA.pop) {                                                      // pop: rebuild as unlocked, halo lights up
+      placeMap();
+      const ni = document.querySelector(`#map-items .isl[data-biome="${b}"]`); if (ni) ni.classList.add('lit', 'unl');
+      const cv = document.createElement('canvas'); cv.className = 'ua-fx'; cv.setAttribute('aria-hidden', 'true');
+      const cxL = row.island.x + row.island.w / 2, cyL = row.island.y + row.island.h * 0.45, R = Math.max(row.island.w, row.island.h) * 0.9;
+      const gw = Math.ceil(2 * R / q), gh = gw; cv.width = gw; cv.height = gh;
+      Object.assign(cv.style, { left: (cxL - gw * q / 2) + 'px', top: (cyL - gh * q / 2) + 'px', width: gw * q + 'px', height: gh * q + 'px' });
+      $('map-items').appendChild(cv); ua.spark = cv; ua.sg = { x: row.sign.x + row.sign.w / 2 - (cxL - gw * q / 2), y: row.sign.y + row.sign.h / 2 - (cyL - gh * q / 2) };
+    }
+    if (ua.spark && f >= UA.pop && f <= UA.sparkEnd) drawSpark(ua.spark, f - UA.pop, q, ua.sg);
+    if (ua.spark && f > UA.sparkEnd) { ua.spark.remove(); ua.spark = null; }
+    if (f >= UA.focus[0] && f <= UA.focus[1]) {                              // camera focus: stepped push-in on the island, then back
+      const k = f - UA.focus[0], n = UA.focus[1] - UA.focus[0], e = [0, .25, .5, .75, 1, 1, 1, 1, 1, .75, .5, .25, 0][Math.round(k / n * 12)];
+      const sc = 1 + 0.1 * e, cx = row.island.x + row.island.w / 2, cy = row.island.y + row.island.h / 2;
+      const cl = (v, lo) => Math.round(Math.min(0, Math.max(lo, v)));      // never expose the map's edges
+      camera(cl((W / 2 - cx) * e * 0.5 - cx * (sc - 1), W - W * sc), cl((H * 0.45 - cy) * e * 0.5 - cy * (sc - 1), H - H * sc), sc);
+      const isl2 = document.querySelector(`#map-items .isl[data-biome="${b}"]`); if (isl2 && isl2.scrollIntoView && k === 0) isl2.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    }
+    if (f === UA.select) { camera(0, 0, 1); selected = b; selT = performance.now(); document.querySelectorAll('#map-items .isl').forEach(x => x.classList.toggle('sel', +x.dataset.biome === b)); refreshPanel(); }
+    if (f >= UA.end) { const keep = ua.b; stopUnlock(); document.querySelectorAll('#map-items .isl.lit').forEach(x => x.classList.remove('lit', 'unl')); if (selected !== keep) { selected = keep; refreshPanel(); } }
+  }
+  // sparkles: 4-point pixel stars stepping outward from the island + the lock breaking into grey chunks from the sign
+  function drawSpark(cv, s, q, sg) {
+    const g = cv.getContext('2d'), w = cv.width, h = cv.height, cx = w / 2, cy = h / 2; g.clearRect(0, 0, w, h);
+    const P = (x, y, ww, hh, c) => { g.fillStyle = c; g.fillRect(Math.round(x), Math.round(y), ww, hh); };
+    const star = (x, y, z, c) => { P(x, y, 1, 1, '#fff'); for (let i = 1; i <= z; i++) { P(x - i, y, 1, 1, c); P(x + i, y, 1, 1, c); P(x, y - i, 1, 1, c); P(x, y + i, 1, 1, c); } };
+    const hsh = n => { const v = Math.sin(n * 91.7 + 17.3) * 43758.5453; return v - Math.floor(v); };
+    if (s === 0) { for (let i = -6; i <= 6; i++) { P(cx + i, cy, 1, 1, '#fff'); P(cx, cy + i, 1, 1, '#fff'); } }
+    for (let i = 0; i < 18; i++) {
+      const a = i / 18 * Math.PI * 2 + hsh(i) * 0.3, rr = (w * 0.12) + s * (w * 0.028) * (0.7 + hsh(i + 9) * 0.6);
+      if (s > 10 && (i + s) % 2) continue;
+      const z = s < 4 ? 2 : s < 10 ? 1 : 0, c = ['#ffd75e', '#fff3b0', '#ffb43a'][(i + s) % 3];
+      star(cx + Math.cos(a) * rr, cy + Math.sin(a) * rr * 0.8, (s + i) % 4 === 0 ? z + 1 : z, c);
+    }
+    if (sg && s < 12) {                                                      // lock chunks (from the sign's padlock)
+      const sx = sg.x / q, sy = sg.y / q;
+      for (let i = 0; i < 8; i++) { const a = -Math.PI / 2 + (i - 3.5) * 0.42, v = 2.2 + hsh(i + 3) * 1.2;
+        P(sx + Math.cos(a) * v * s, sy + Math.sin(a) * v * s + 0.18 * s * s, 3, 3, i % 2 ? '#8a8f94' : '#c9ced3'); P(sx + Math.cos(a) * v * s, sy + Math.sin(a) * v * s + 0.18 * s * s + 2, 3, 1, '#34383c'); }
+    }
+  }
   hooks.map = {
-    enter() { selected = -1; placeMap(); refreshPanel(); },
+    enter(o) {
+      selected = -1;
+      if (o && o.unlock >= 0 && o.unlock < D.length) { startUnlock(o.unlock, o.manual); return; }
+      placeMap();
+      if (o && o.focus >= 0 && unlockedB(o.focus)) { selected = o.focus; selT = performance.now(); placeMap(); }   // CHANGE BIOME: current biome pre-selected
+      refreshPanel();
+    },
+    leave() { stopUnlock(); },
     back() { show('title'); },
   };
 
@@ -517,11 +625,22 @@
     space: ['#2c2f7a', ['....w....', '...www...', '...wcw...', '...www...', '..rwwwr..', '.rrwwwrr.', '.r.yfy.r.', '....f....', '.........'], { w: '#f4f6ff', c: '#33e1ff', r: '#ff4a4a', y: '#ffd24a', f: '#ff8a2a' }],
   };
   const tabCol = b => (TAB[D[b].key] || ['#8a5a2a'])[0];
+  // v7: a biome that is not unlocked yet (and Unlock-all is off) is never revealed in the Zoopedia, matching the map: its tab is
+  // the map's locked-sign grey with the same padlock (dark shackle/outline, pale body, shaded base, keyhole), aria name 'Locked';
+  // its pages say '???', show the grey padlock badge in place of the sign, and every animal is a '?' block. Arrows, swipes and
+  // tabs still page through every biome. When a biome unlocks, the tab repaints themed the next time the book is shown.
+  const TAB_LOCK = ['#8a8f94', ['...kkk...', '..k...k..', '..k...k..', '.kkkkkkk.', '.kwwwwwk.', '.kwwkwwk.', '.kwwkwwk.', '.ksssssk.', '.kkkkkkk.'],
+    { k: '#26292c', w: '#e3e5e7', s: '#b4b8bc' }];
+  const tabOf = i => unlockedB(i) ? (TAB[D[i].key] || ['#8a5a2a', [], {}]) : TAB_LOCK;
+  const unlSig = () => D.map((x, i) => unlockedB(i) ? 1 : 0).join('');
+  let tabSig = '';
+  function syncTabs() {
+    document.querySelectorAll('#tabs .tab').forEach((t, i) => { const un = unlockedB(i); t.setAttribute('aria-label', un ? D[i].name : 'Locked'); t.classList.toggle('locked', !un); });
+  }
   function buildTabs() {
     const box = $('tabs'); if (box.childElementCount) return;
     D.forEach((bm, i) => {
       const t = document.createElement('button'); t.className = 'tab'; t.dataset.b = i; t.setAttribute('role', 'tab'); t.setAttribute('aria-label', bm.name);
-      const [col, gl] = TAB[bm.key] || ['#8a5a2a', []]; t.style.setProperty('--tc', col);
       t.addEventListener('click', () => flipTo(i)); box.appendChild(t);
     });
   }
@@ -721,7 +840,8 @@
     const bw = W - 16 * u, bh = Math.min(regBot - regTop, bw * 1.5);
     const bt = regTop + Math.max(0, (regBot - regTop - bh) / 2);
     Object.assign(book.style, { left: 8 * u + 'px', right: 'auto', width: bw + 'px', top: bt + 'px', height: bh + 'px', bottom: 'auto' });
-    const tabs = D.map((bm, i) => ({ col: tabCol(i), glyph: (TAB[bm.key] || [0, []])[1], gpal: (TAB[bm.key] || [0, 0, {}])[2] }));
+    const tabs = D.map((bm, i) => { const tb = tabOf(i); return { col: tb[0], glyph: tb[1], gpal: tb[2] }; });
+    tabSig = unlSig(); syncTabs();
     zGeo = paintBook($('book-cv'), bw, bh, { tabs, ribbon: true, crops: true, seed: 5 });
     book.style.left = Math.round((W - parseFloat($('book-cv').style.width)) / 2) + 'px';
     book.style.setProperty('--pgL', zGeo.urlL); book.style.setProperty('--pgR', zGeo.urlR);
@@ -734,18 +854,34 @@
     const pw = zGeo.L.w - 28 * u, ph = zGeo.L.h - 40 * u - 34 * u;
     const cd = Math.max(40 * u, Math.min((pw - 10 * u) / 2, ph / 3 - 46 * u));
     book.style.setProperty('--cd', cd + 'px');
+    measureNames();
     zooBuilt = true;
   }
-  function spot(b, t) {
+  // v7: every Zoopedia name uses the SAME font size. Names wrap to at most two lines: multi-word names at the space, and the
+  // eight long dinosaur names at a syllable (soft hyphen, e.g. COMPSO-/GNATHUS, DILOPHO-/SAURUS). The size is the one that fits
+  // the longest resulting line (9 characters: CLOWNFISH / JELLYFISH) in a cell, measured with the real pixel font.
+  const HYPH = { COMPSOGNATHUS: 'COMPSO|GNATHUS', PTERODACTYL: 'PTERO|DACTYL', DILOPHOSAURUS: 'DILOPHO|SAURUS', STEGOSAURUS: 'STEGO|SAURUS',
+    TRICERATOPS: 'TRICERA|TOPS', ANKYLOSAURUS: 'ANKYLO|SAURUS', SPINOSAURUS: 'SPINO|SAURUS', BRACHIOSAURUS: 'BRACHIO|SAURUS' };
+  const nameText = n => n.toUpperCase().split(' ').map(w => (HYPH[w] || w).replace('|', '\u00ad')).join(' ');
+  const NAME_MAXL = Math.max(...D.flatMap(b => b.animals.flatMap(a => nameText(a.n).split(/[ \u00ad]/).map((x, i, arr) => x.length + (/\u00ad/.test(nameText(a.n)) && i === 0 ? 1 : 0)))));
+  let nmEm = 0.885, nmCell = 0;             // glyph advance (em) of the pixel font; cell width (px) - measured per layout
+  function measureNames() {
+    const pg = $('pg-l'); if (!pg) return;
+    const sp = document.createElement('span'); sp.className = 'nm'; sp.style.cssText = 'position:absolute;visibility:hidden;white-space:nowrap;letter-spacing:0;font-size:20px'; sp.textContent = 'MMMMMMMMMM';
+    pg.appendChild(sp); const w = sp.getBoundingClientRect().width; sp.remove(); if (w > 0) nmEm = w / 200;
+    const pw = pg.getBoundingClientRect().width; if (pw > 0) nmCell = (pw - 28 * u - 10 * u) / 2;
+  }
+  const nameFz = cd => { const cell = nmCell > 0 ? Math.max(cd * 0.9, nmCell) : cd; return Math.floor(Math.min(13 * u, cell * 0.96 / (NAME_MAXL * nmEm)) * 10) / 10; };
+  function spot(b, t, locked) {
     const d = document.createElement('div'); d.className = 'spot';
     const c = document.createElement('div'); c.className = 'circ'; d.appendChild(c);
     const cap = document.createElement('div'); cap.className = 'cap'; d.appendChild(cap);
     const no = document.createElement('div'); no.className = 'no'; no.textContent = 'No.' + String(b * 11 + t).padStart(2, '0'); cap.appendChild(no);
     const n = document.createElement('div'); n.className = 'nm'; cap.appendChild(n);
     const a = D[b].animals[t - 1], cd = parseFloat(getComputedStyle($('book')).getPropertyValue('--cd')) || 84;
-    if (isFound(b, t)) {
+    if (!locked && isFound(b, t)) {
       const cv = document.createElement('canvas'); c.appendChild(cv);
-      d.classList.add('found'); d.dataset.tier = t; n.textContent = a.n.toUpperCase();
+      d.classList.add('found'); d.dataset.tier = t; n.textContent = nameText(a.n);
       plateWaits.push(drawPlate(cv, b, t, cd * .86));
       d.addEventListener('click', () => { if (!flipping && !swiped) openPopup(b, t); });
       d.setAttribute('role', 'button'); d.setAttribute('aria-label', a.n);
@@ -754,25 +890,45 @@
       const q = document.createElement('div'); q.className = 'lockc'; q.textContent = '?'; c.appendChild(q);
       n.textContent = '???'; n.classList.add('lk'); d.setAttribute('aria-label', 'Not found yet');
     }
-    const lw = Math.max(...n.textContent.split(' ').map(x => x.length)), fz = Math.min(13 * u, cd / (lw * 1.12)); if (fz < 13 * u) { n.style.fontSize = fz + 'px'; n.style.letterSpacing = '0'; }
+    n.style.fontSize = nameFz(cd) + 'px'; n.style.letterSpacing = '0';   // v7: one size for every name (fits the longest word)
     return d;
   }
   // fill one page of biome b: heading, then left = pasted-in biome sign + tiers 1-5, right = tiers 6-11; page number at the foot
   function fillPage(el, b, side) {
     el.innerHTML = '';
+    if (!unlockedB(b)) {                                                 // v7: locked biome - nothing about it is revealed
+      el.classList.add('lockedb');
+      const hd = document.createElement('div'); hd.className = 'pghead'; hd.innerHTML = '<span></span>'; hd.firstChild.textContent = side === 'l' ? '???' : 'FIELD NOTES'; el.appendChild(hd);
+      if (side === 'l') {
+        // the sign slot becomes a grey plate the same size as the '?' plates, with the map's padlock centred in it
+        const sd = document.createElement('div'); sd.className = 'spot unfound locksign'; sd.setAttribute('role', 'img'); sd.setAttribute('aria-label', 'Locked');
+        sd.innerHTML = '<div class="circ"><div class="lockpad">' + LOCK_SVG + '</div></div><div class="cap"><div class="no">&nbsp;</div><div class="nm lk">&nbsp;</div></div>';
+        el.appendChild(sd);
+        for (let t = 1; t <= 5; t++) el.appendChild(spot(b, t, true));
+        // hidden copy of the tier-1 caption so the plate stack (and so its circle) sits exactly level with the '?' plates
+        const c1 = el.querySelector('.spot:not(.locksign) .cap');
+        if (c1) { const g = c1.cloneNode(true); g.setAttribute('aria-hidden', 'true'); sd.replaceChild(g, sd.querySelector('.cap')); }
+      } else for (let t = 6; t <= 11; t++) el.appendChild(spot(b, t, true));
+      const pn = document.createElement('div'); pn.className = 'pgno'; pn.textContent = '- ' + (b * 2 + (side === 'l' ? 1 : 2)) + ' -'; el.appendChild(pn);
+      return;
+    }
     const hd = document.createElement('div'); hd.className = 'pghead'; hd.innerHTML = '<span></span>';
     hd.firstChild.textContent = side === 'l' ? D[b].name.toUpperCase() : 'FIELD NOTES'; el.appendChild(hd);
     if (side === 'l') {
-      const sd = document.createElement('div'); sd.className = 'spot signspot'; const si = document.createElement('img'); si.src = SIGN[b]; si.alt = D[b].name; sd.appendChild(si); el.appendChild(sd);
+      // v7: the sign sits in a plate-height box above an invisible copy of the tier-1 caption, so its centre lines up with the
+      // centre of the tier-1 picture plate beside it (whatever that caption's height)
+      const sd = document.createElement('div'); sd.className = 'spot signspot'; const sb = document.createElement('div'); sb.className = 'sbox';
+      const si = document.createElement('img'); si.src = SIGN[b]; si.alt = D[b].name; sb.appendChild(si); sd.appendChild(sb); el.appendChild(sd);
       plateWaits.push(si.decode ? si.decode().catch(() => {}) : new Promise(r => { si.onload = si.onerror = r; }));
-      for (let t = 1; t <= 5; t++) el.appendChild(spot(b, t));
+      const s1 = spot(b, 1), cc = s1.querySelector('.cap').cloneNode(true); cc.classList.add('ghost'); cc.setAttribute('aria-hidden', 'true'); sd.appendChild(cc);
+      el.appendChild(s1); for (let t = 2; t <= 5; t++) el.appendChild(spot(b, t));
     } else for (let t = 6; t <= 11; t++) el.appendChild(spot(b, t));
     const pn = document.createElement('div'); pn.className = 'pgno'; pn.textContent = '- ' + (b * 2 + (side === 'l' ? 1 : 2)) + ' -'; el.appendChild(pn);
   }
   function syncNav() {
-    $('zoo-n').textContent = $('zoo-hn').textContent = foundCount();   // v6: the x/88 count also sits in the Zoopedia header
+    $('zoo-n').textContent = foundCount();   // v7: x/88 lives only on the plank above the book (header badge removed)
     $('zoo-prev').disabled = $('zoo-cl').disabled = zb === 0; $('zoo-next').disabled = $('zoo-cr').disabled = zb === D.length - 1;
-    $('book').dataset.biome = D[zb].key;
+    $('book').dataset.biome = unlockedB(zb) ? D[zb].key : 'locked';
     document.querySelectorAll('#tabs .tab').forEach((t, i) => { t.classList.toggle('on', i === zb); t.setAttribute('aria-selected', i === zb); });
     if (zGeo) zGeo.drawActive($('book-tab'), zb);
   }
@@ -801,6 +957,7 @@
   function preloadNear(b) { [b - 1, b + 1].forEach(x => { if (x >= 0 && x < D.length) { getPage(x, 'l'); getPage(x, 'r'); Art.preload(x); } }); }
   function renderBook() {
     if (flipping) return;
+    if (cur === 'zoo' && tabSig && tabSig !== unlSig()) zooLayout();   // v7: unlock state changed (e.g. Unlock-all): repaint the tabs
     mount($('pg-l'), getPage(zb, 'l')); mount($('pg-r'), getPage(zb, 'r')); syncNav();
     preloadNear(zb);
   }
@@ -891,7 +1048,7 @@
     $('pop-name').textContent = a.n.toUpperCase();
     $('pop-name').style.fontSize = a.n.length > 10 ? (3.8 * 10 / a.n.length) + 'rem' : '';
     $('pop-sign').src = SIGN[b]; $('pop-sign').alt = D[b].name;
-    $('pop-tier').textContent = 'TIER ' + t + '/11';
+    $('pop-tier').textContent = 'No.' + String(b * 11 + t).padStart(2, '0') + ' \u00b7 TIER ' + t + '/11';   // v7: same No. label as the book / new-animal card
     $('pop-fact').innerHTML = '<b>FUN FACT</b>'; $('pop-fact').appendChild(document.createTextNode(a.f));
     document.querySelector('#popup .card').style.setProperty('--tc', tabCol(b));
     if (!popOpen) { el.classList.remove('hidden'); el.classList.add('fade'); void el.offsetWidth; requestAnimationFrame(() => el.classList.remove('fade')); popOpen = true; }
@@ -938,7 +1095,24 @@
   hooks.scores = { enter: renderScores, back() { show('title'); } };
 
   // =====================================================================================
-  hooks.game = { enter(o) { if (o && typeof o === 'object') window.ZMGame.enter(o.mode || 'new', o.biome); else window.ZMGame.enter(o || 'new'); } };
+  // v7 HUD: SCORE, NEXT, BEST, pause, settings are spread with space-evenly (equal gaps + side margins). The stat font is fitted
+  // once per viewport width for the worst case (6-digit score AND best, e.g. 'SCORE 123,456') so the gaps stay >= HUD_GAP px
+  // and never change as the score grows; capped at 15 px, in 0.5 px steps.
+  const HUD_GAP = 6, HUD_MAX = 15, hudCv = document.createElement('canvas').getContext('2d');
+  let hudFs = HUD_MAX;
+  function fitHud() {
+    const st = document.querySelector('#topbar .stat'); if (!st) return;
+    const cs = getComputedStyle(st), fam = cs.fontFamily || 'monospace', wt = cs.fontWeight || '400';
+    hudCv.font = wt + ' 20px ' + fam;
+    const per20 = Math.max(hudCv.measureText('SCORE 123,456').width, hudCv.measureText('BEST 123,456').width);
+    const nx = $('next').getBoundingClientRect().width || 72, btn = [...document.querySelectorAll('#topbar .iconbtn')].reduce((a, b) => a + (b.getBoundingClientRect().width || 30), 0);
+    const room = (innerWidth - nx - btn - HUD_GAP * 6) / 2 - 2;        // -2: the 2 px pixel outline (text-shadow) on each stat
+    hudFs = Math.max(9, Math.min(HUD_MAX, Math.floor(room / per20 * 20 * 2) / 2));
+    document.documentElement.style.setProperty('--hudfs', hudFs + 'px');
+  }
+  fitHud(); if (document.fonts && document.fonts.ready) document.fonts.ready.then(fitHud);
+  addEventListener('resize', fitHud);
+  hooks.game = { enter(o) { requestAnimationFrame(fitHud); if (o && typeof o === 'object') window.ZMGame.enter(o.mode || 'new', o.biome); else window.ZMGame.enter(o || 'new'); } };
   let rzT;
   addEventListener('resize', () => { clearTimeout(rzT); rzT = setTimeout(() => {
     measure(); titleBg = null; islSrc = [];
@@ -946,10 +1120,11 @@
     if (popOpen) openPopup(popB, popT);
   }, 140); });
 
-  window.ZMUI = { go: show, openZoo, toast, get screen() { return cur; }, openPopup, closePopup, get popupOpen() { return popOpen; }, isFound, foundCount, get flipping() { return flipping; }, get preloaded() { return preloadDone; }, preloadAll, get turnLog() { return turnLog.slice(); }, get spread() { return zb; }, flipTo: b => flipTo(b),
+  window.ZMUI = { get unlockAnim() { return ua ? { b: ua.b, f: ua.f } : null; }, get unlockLog() { return uaLog.slice(); }, unlockStep(n) { for (let i = 0; i < (n || 1) && ua; i++) uaStep(); return ua ? ua.f : -1; }, UA,
+    get hudFs() { return hudFs; }, fitHud, go: show, openZoo, toast, get screen() { return cur; }, openPopup, closePopup, get popupOpen() { return popOpen; }, isFound, foundCount, get flipping() { return flipping; }, get preloaded() { return preloadDone; }, preloadAll, get turnLog() { return turnLog.slice(); }, get spread() { return zb; }, flipTo: b => flipTo(b),
     unlocked: unlockedB, foundIn, get mapSelected() { return selected; }, get mapLayout() { return mapL; },
     title: { get clock() { return TA.clock; }, get penguin() { return { mode: TA.pen.mode, taps: TA.pen.taps.length, falls: TA.pen.falls, waddles: TA.pen.waddles, pose: penPose() }; },
-      get bear() { return Object.assign({ pose: bearPose() }, TA.bear); }, get monkey() { return Object.assign({ pose: monkPose() }, TA.monk); }, hitRect, hitAt, timing: { WADDLE, FALL_T, BEAR_FIRST, BEAR_EVERY, BEAR_DUR, MONK_DUR },
+      get bear() { return Object.assign({ pose: bearPose() }, TA.bear); }, get monkey() { return Object.assign({ pose: monkPose() }, TA.monk); }, hitRect, hitAt, timing: { WADDLE, FALL_T, MONK_DUR, BEAR }, bearRng(fn) { bearRng = fn || Math.random; }, glyph: GLYPH,
       // test/screenshot helpers: freeze the title clock and step it by hand
       hold(v) { TA.hold = !!v; }, setClock(c) { TA.clock = c; titleTick(); }, frames: { pen: PENF, bear: BEARF, monk: MONKF } } };
   // #play-<biome> (e.g. #play-ocean) starts that biome directly

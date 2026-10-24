@@ -100,13 +100,18 @@ img.smooth{image-rendering:auto}
 .lockc{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:calc(var(--cd) * .5);font-weight:700;color:#5e4a2c;text-shadow:.2rem .2rem 0 rgba(255,246,220,.45)}
 .cap{display:flex;flex-direction:column;align-items:center;gap:.15rem;max-width:100%;min-width:0}
 .spot .no{font-size:1rem;color:#9a7a52;letter-spacing:.1rem}
-.spot .nm{font-size:1.3rem;font-weight:700;color:#3a2210;text-align:center;white-space:normal;line-height:1.1;letter-spacing:.05rem;max-width:100%;overflow:hidden}
+.spot .nm{hyphens:manual;-webkit-hyphens:manual;overflow-wrap:normal;word-break:normal;font-size:1.3rem;font-weight:700;color:#3a2210;text-align:center;white-space:normal;line-height:1.1;letter-spacing:.05rem;max-width:100%;overflow:hidden}
 .spot .nm.lk{color:#a09078;letter-spacing:.3rem}
 .spot.signspot{position:relative}
-.spot.signspot img{width:90%;height:auto;image-rendering:auto;display:block;transform:rotate(-2deg);filter:drop-shadow(.2rem .3rem 0 rgba(90,60,25,.25))}
-.spot.signspot::before,.spot.signspot::after{content:"";position:absolute;width:3.6rem;height:1.3rem;background:rgba(236,226,196,.82);border:.1rem solid rgba(160,140,100,.35);z-index:1;top:calc(50% - 4.6rem)}
-.spot.signspot::before{left:4%;transform:rotate(-28deg)}
-.spot.signspot::after{right:4%;transform:rotate(24deg)}
+.spot.signspot .sbox{width:100%;height:var(--cd);display:flex;align-items:center;justify-content:center;flex:0 0 auto}
+.spot.signspot .cap.ghost{visibility:hidden}
+.spot.signspot img{width:90%;max-height:calc(var(--cd) * 1.1);object-fit:contain;height:auto;image-rendering:auto;display:block;transform:rotate(-2deg);filter:drop-shadow(.2rem .3rem 0 rgba(90,60,25,.25))}
+/* v7: no tape strips on the biome sign; it sits clean on the page */
+.spot.locksign .cap{visibility:hidden}
+.spot.locksign .lockpad{width:calc(var(--cd) * .4);display:flex;align-items:center;justify-content:center}
+.spot.locksign .lockpad svg{width:100%;height:auto;display:block;filter:drop-shadow(.2rem .2rem 0 rgba(255,246,220,.45))}
+.pgw.lockedb .spot.unfound .circ{filter:grayscale(1)}
+.pgw.lockedb .spot .nm.lk{color:#9a9a9a}
 /* page turn: a leaf that rotates around the spine (3D, with backface hidden: works on iOS Safari); faces wear the painted paper */
 #leaf{position:absolute;z-index:4;transform-style:preserve-3d;-webkit-transform-style:preserve-3d;pointer-events:none;will-change:transform}
 #leaf.hidden{display:none}
@@ -170,9 +175,9 @@ img.smooth{image-rendering:auto}
 
 /* scores */
 #scr-scores{background:#5a3920}
-#score-list{position:absolute;left:1.6rem;right:1.6rem;z-index:3;display:flex;flex-direction:column;gap:.9rem}
+#score-list{position:absolute;left:1.6rem;right:1.6rem;z-index:3;display:flex;flex-direction:column;gap:.9rem;justify-content:space-between}  /* v7: rows spread evenly from the header to the bottom safe band */
 .srow{display:flex;align-items:center;gap:1.4rem;background:#3a2412;border:.3rem solid #1e1208;border-radius:.6rem;padding:.5rem 1.4rem .5rem .6rem;
-  box-shadow:0 0 0 .25rem #8a5a32 inset,0 .4rem 0 rgba(0,0,0,.35);flex:1;min-height:0}
+  box-shadow:0 0 0 .25rem #8a5a32 inset,0 .4rem 0 rgba(0,0,0,.35);flex:1 1 0;min-height:0;max-height:8.8rem}
 .srow .sg{height:100%;aspect-ratio:1.215;position:relative;flex:0 0 auto}
 .srow .sg img{width:100%;height:100%;display:block;image-rendering:auto}
 .srow .sg .lsign{position:absolute;inset:0}
@@ -192,3 +197,10 @@ img.smooth{image-rendering:auto}
 #toast{position:fixed;z-index:70;top:30%}
 #rotate{position:fixed}
 .lockico{shape-rendering:crispEdges}
+/* v7 map unlock animation */
+#map-items .ua-fx{position:absolute;image-rendering:pixelated;pointer-events:none;z-index:5}
+.isl.lit canvas.halo{animation:halo-lit .9s steps(6) forwards}
+.isl.lit.sel canvas.halo{animation:halo-lit .9s steps(6) forwards,glow 1.1s ease-in-out .9s infinite alternate}
+.isl.unl canvas.art{animation:isl-pop .42s steps(5) both}
+@keyframes halo-lit{0%{opacity:0}17%{opacity:1}34%{opacity:.25}51%{opacity:1}68%{opacity:.5}100%{opacity:1}}
+@keyframes isl-pop{0%{transform:scale(.7)}50%{transform:scale(1.12)}100%{transform:scale(1)}}

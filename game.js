@@ -23,7 +23,7 @@
   const TUNE_DEF = { gravity: 10 /* m/s² @150 pt/m, Brock's iPhone pick (v3 was 34) */, bounce: 0.20 /* animal-on-animal restitution, small tiers */, weight: 1.10 /* density × per tier */ };
   const TUNE_RANGE = { gravity: [10, 60, 1], bounce: [0, 0.6, 0.01], weight: [1, 1.45, 0.01] };
   const LS_TUNE = 'zoomash.forest.tune.v4' /* bumped so saved v3 sliders don't override the new defaults */, LS_PREFS = 'zoomash.prefs';
-  const MAX_BOX_RATIO = 1.45, DROP_VY = 1.0 /* px per 1/60 s initial push */;
+  const MAX_BOX_RATIO = 1.30 /* v7: was 1.45; tall phones keep the extra height as sky above the held animal */, DROP_VY = 1.0 /* px per 1/60 s initial push */;
   // Empty-board drop-to-floor at gravity 10, measured 0.85 s (tier 1; 390×844 and 440×956 match).
   // Cooldown is half of that fall, and scales with 1/sqrt(gravity) so it stays about half a fall as the slider moves.
   const FALL_G10 = 0.85;
@@ -125,7 +125,7 @@
     const baseHeld = top + 10 + r5;
     const gapHL = Math.max(SPAWN_ABOVE, r5 + 4);          // held animal -> danger line
     // v2: the forest-floor band stays thin (16-26 px); spare height goes into a taller play area
-    // (danger line -> floor from 1.12× up to 1.45× the width), and only what is left over pushes the stack down.
+    // (danger line -> floor from 1.12× up to 1.30× the width, v7), and only what is left over pushes the stack down.
     const minBand = 16, band = Math.max(minBand, Math.min(26, Math.round(H * 0.026)));
     const avail = stripTop - band - (baseHeld + gapHL);
     const box = Math.max(BOX_RATIO * Wi, Math.min(MAX_BOX_RATIO * Wi, avail));
@@ -296,14 +296,28 @@
     }
   }
   // ---- combo chains: merges within COMBO_WIN of each other ----
-  let chain = 0, lastMergeAt = -9, comboLog = [];
+  // v7 COMBO BUG fix: the pop is a CSS animation with fill-mode 'forwards' started by adding class 'on', and v6 never took
+  // the class off again. Leaving the level hides #app (display:none) and entering a new round shows it again - and CSS
+  // restarts every animation on an element that goes from display:none back to rendered. So after the first combo of a
+  // session, "COMBO x2! +10" replayed at the start of every later round (same for the ZOO MASH! banner). Now the class is
+  // dropped when the animation ends and whenever a round starts/restarts/resumes, and the chain itself only counts merges
+  // that happen after the player's first drop of the round.
+  let chain = 0, lastMergeAt = -9, comboLog = [], comboShown = 0;
+  const JUICE_ON = ['combo', 'mash'];
+  JUICE_ON.forEach(id => $(id).addEventListener('animationend', e => { if (e.target === $(id)) $(id).classList.remove('on'); }));
+  function clearJuice() {
+    chain = 0; lastMergeAt = -9;
+    JUICE_ON.forEach(id => $(id).classList.remove('on', 'hot'));
+    const sc = elScore.parentNode; sc.classList.remove('pulse', 'pulse-big');
+  }
   function combo(x, y) {
+    if (!dropsTotal) { chain = 0; lastMergeAt = -9; return; }        // no player drop yet this round -> never a combo
     chain = now - lastMergeAt <= COMBO_WIN ? chain + 1 : 1; lastMergeAt = now;
     if (chain < 2) return;
     const bonus = COMBO_BONUS * (chain - 1);
     score += bonus; elScore.textContent = score.toLocaleString('en-US');
     if (score > best) { best = score; ls.set(lsKey(B, 'best'), best); elBest.textContent = best.toLocaleString('en-US'); }
-    comboLog.push({ n: chain, bonus, t: +now.toFixed(2) }); if (comboLog.length > 30) comboLog.shift();
+    comboLog.push({ n: chain, bonus, t: +now.toFixed(2) }); if (comboLog.length > 30) comboLog.shift(); comboShown++;
     const el = $('combo'); el.querySelector('b').textContent = 'COMBO x' + chain + '!'; el.querySelector('i').textContent = '+' + bonus;
     el.classList.toggle('hot', chain >= 4);
     el.classList.remove('on'); void el.offsetWidth; el.classList.add('on');
@@ -341,10 +355,70 @@
     if (seen.has(t)) { if (!quiet && cardPend.delete(t)) newCard(t); return; }
     seen.add(t); ls.set(lsKey(B, 'seen'), [...seen].sort((a, b) => a - b));
     renderStrip(t);
+    // v7: the first tier-11 of a biome whose next biome was still locked -> BIOME COMPLETE celebration (once per biome,
+    // remembered in localStorage; never in Unlock-all mode, where nothing is actually being unlocked)
+    const celebrate = t === 11 && B < D.length - 1 && !ls.get('zoomash.demo.unlockAll', false) && !ls.get(lsKey(B, 'celebrated'), false);
+    if (celebrate) { cbOpenSoon(B); return; }
     if (quiet) cardPend.add(t); else newCard(t);
     // progression: reaching this biome's tier-11 animal unlocks the next biome on the map
     if (t === 11 && B < D.length - 1) toast(D[B + 1].name + ' UNLOCKED!');
   }
+  // ---- v7 BIOME COMPLETE! celebration: frame-based (12 fps) chunky pixel confetti + fireworks, banner, two buttons ----
+  const CB_FPS = 12, CB_PX = 3;                                        // 1 fx pixel = 3 CSS px
+  const CB_COL = ['#ffd75e', '#e84a3c', '#4fc3f7', '#9fe36b', '#ff8ad8', '#ffffff', '#ff9f2e'];
+  const cbH = n => { const v = Math.sin(n * 127.1 + 311.7) * 43758.5453; return v - Math.floor(v); };   // stable per-particle hash
+  let cb = { on: false, b: -1, f: 0, hold: null, t0: 0, raf: 0, log: [] }, cbT = 0;
+  function cbOpenSoon(b) { clearTimeout(cbT); cbT = setTimeout(() => cbOpen(b), 650); }   // let the tier-11 merge pop land first
+  function cbOpen(b) {
+    if (!active || gameOver) { if (b < D.length - 1) toast(D[b + 1].name + ' UNLOCKED!'); return; }
+    ls.set(lsKey(b, 'celebrated'), true);
+    clearTimeout(cbT); clearJuice(); cardQ.length = 0; nextCard(); aiming = false;
+    elPause.classList.add('hidden'); elSet.classList.add('hidden'); paused = true;
+    const a = D[b].animals[10], el = $('celebrate');
+    $('cb-img').src = spriteSrc(11);
+    $('cb-name').textContent = a.n.toUpperCase();
+    $('cb-no').textContent = 'No.' + String(b * 11 + 11).padStart(2, '0');
+    $('cb-biome').textContent = D[b].name.toUpperCase();
+    $('cb-unl').textContent = D[b + 1].name.toUpperCase() + ' UNLOCKED!';
+    el.classList.remove('hidden', 'in'); void el.offsetWidth; el.classList.add('in');
+    cb = { on: true, b, f: 0, hold: null, t0: performance.now(), raf: 0, log: cb.log };
+    cb.log.push({ b, at: +now.toFixed(2) });
+    cbSize(); buzz([20, 60, 20, 60, 40]);
+    const loop = () => { if (!cb.on) return; if (cb.hold == null) { const f = Math.floor((performance.now() - cb.t0) / 1000 * CB_FPS); if (f !== cb.f || f === 0) { cb.f = f; cbDraw(f); } } cb.raf = requestAnimationFrame(loop); };
+    cbDraw(0); cb.raf = requestAnimationFrame(loop);
+  }
+  function cbClose() { clearTimeout(cbT); if (!cb.on) { $('celebrate').classList.add('hidden'); return; } cb.on = false; cancelAnimationFrame(cb.raf); $('celebrate').classList.add('hidden'); }
+  function cbSize() { const c = $('cb-fx'); c.width = Math.ceil(window.innerWidth / CB_PX); c.height = Math.ceil(window.innerHeight / CB_PX); }
+  function cbDraw(f) {
+    const c = $('cb-fx'), g = c.getContext('2d'), W = c.width, H = c.height;
+    g.clearRect(0, 0, W, H);
+    const P = (x, y, w, h, col) => { g.fillStyle = col; g.fillRect(Math.round(x), Math.round(y), w, h); };
+    // fireworks: a new burst every 7 frames, each lives 12 frames; 16 sparks on a ring that steps outward and sags
+    for (let k = Math.max(0, Math.floor((f - 12) / 7)); k <= Math.floor(f / 7); k++) {
+      const s = f - k * 7; if (s < 0 || s > 11) continue;
+      const cx = W * (0.15 + cbH(k * 3 + 1) * 0.7), cy = H * (0.07 + cbH(k * 3 + 2) * 0.16) + (k % 3 === 2 ? H * 0.62 : 0), c1 = CB_COL[k % CB_COL.length], c2 = CB_COL[(k + 3) % CB_COL.length];
+      if (s === 0) { P(cx - 4, cy, 9, 1, '#fff'); P(cx, cy - 4, 1, 9, '#fff'); P(cx - 1, cy - 1, 3, 3, c1); continue; }   // flash
+      const rr = 3 + s * 3.2, sag = 0.12 * s * s;
+      for (let i = 0; i < 20; i++) {
+        const a = i / 20 * Math.PI * 2 + k, x = cx + Math.cos(a) * rr, y = cy + Math.sin(a) * rr + sag;
+        if (s >= 8 && (i + s) % 2) continue;                          // dithered fade-out
+        const col = s < 2 ? '#ffffff' : s < 7 ? c1 : c2, z = s < 7 ? 2 : 1;
+        P(x, y, z, z, col);
+        if (s >= 2 && s < 8) { P(x - Math.cos(a) * 3, y - Math.sin(a) * 3, 1, 1, c2); P(x - Math.cos(a) * 5, y - Math.sin(a) * 5, 1, 1, '#ffffff'); }   // short trail
+      }
+    }
+    // confetti: 90 chunky flakes falling with a stepped sway; they flip between 2x1 / 1x2 / 2x2 every few frames
+    for (let i = 0; i < 110; i++) {
+      const sp = 1.6 + cbH(i + 50) * 1.8, x0 = cbH(i + 7) * W, y0 = -cbH(i + 13) * H * 0.7 + H * 0.25, span = H + 8;
+      const y = ((y0 + f * sp) % span + span) % span - 4, x = x0 + [0, 1, 2, 1, 0, -1, -2, -1][(Math.floor(f / 2) + i) % 8] * (1 + (i % 2));
+      if (f * sp + y0 < -3) continue;                                  // not in view yet (first fall from the top)
+      const ph = (Math.floor(f / 3) + i) % 3, col = CB_COL[i % CB_COL.length];
+      P(x, y, ph === 1 ? 1 : 2, ph === 0 ? 1 : 2, col);
+    }
+  }
+  window.addEventListener('resize', () => { if (cb.on) { cbSize(); cbDraw(cb.f); } });
+  $('cb-keep').addEventListener('click', () => { cbClose(); paused = false; chain = 0; lastMergeAt = -9; canDropAt = Math.max(canDropAt, now + 0.25); });
+  $('cb-next').addEventListener('click', () => { const b = cb.b; cbClose(); if (window.ZMUI) window.ZMUI.go('map', { unlock: b + 1 }); });
   // ---- "NEW ANIMAL!" card: first time a tier is created in a biome (not shown for entries Unlock all revealed) ----
   const cardQ = []; let cardOn = null, cardT = 0, cardLog = [];
   function newCard(t) {
@@ -394,11 +468,11 @@
 
   function reset() {
     for (const b of [...animals]) removeAnimal(b);
-    mergeQ = []; pops.length = 0; fx.length = 0; lastDrop = null; fallTime = 0; chain = 0; lastMergeAt = -9; shk.a = 0; nearT = 0; danger = 'none';
+    mergeQ = []; pops.length = 0; fx.length = 0; lastDrop = null; fallTime = 0; clearJuice(); shk.a = 0; nearT = 0; danger = 'none';
     score = 0; elScore.textContent = '0'; elBest.textContent = best.toLocaleString('en-US');
     current = rnd(); next = rnd(); setNextUI(); cardPend.clear(); markSeen(current, true);
     aimX = L.W / 2; canDropAt = now + 0.2; gameOver = false; paused = false; warnOn = false; dropsTotal = mergesTotal = 0;
-    elOver.classList.add('hidden'); elPause.classList.add('hidden'); elSet.classList.add('hidden');
+    elOver.classList.add('hidden'); elPause.classList.add('hidden'); elSet.classList.add('hidden'); cbClose();
   }
   function endGame() {
     gameOver = true; aiming = false; cardQ.length = 0; nextCard();
@@ -444,7 +518,7 @@
 
   // ---- pause menu + settings ----
   function openPanel(el) { if (gameOver) return; aiming = false; elPause.classList.add('hidden'); elSet.classList.add('hidden'); el.classList.remove('hidden'); paused = true; }
-  function closePanels() { elPause.classList.add('hidden'); elSet.classList.add('hidden'); paused = false; }
+  function closePanels() { elPause.classList.add('hidden'); elSet.classList.add('hidden'); paused = false; chain = 0; lastMergeAt = -9; }   // v7: resume never continues a chain
   let toastT; function toast(msg) { const t = $('toast'); t.textContent = msg; t.classList.remove('hidden'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.add('hidden'), 1400); }
   $('pause').addEventListener('click', () => openPanel(elPause));
   $('gear').addEventListener('click', () => { if (gameOver) elSet.classList.remove('hidden'); else openPanel(elSet); });
@@ -452,6 +526,8 @@
   $('p-restart').addEventListener('click', () => reset());
   // pause menu -> other screens (ui.js owns navigation)
   $('p-main').addEventListener('click', () => { if (window.ZMUI) window.ZMUI.go('title'); });
+  // v7: CHANGE BIOME ends the round exactly like MAIN MENU (leave() clears juice/celebration; the next PLAY is a fresh round) and opens the map
+  $('p-biome').addEventListener('click', () => { if (window.ZMUI) window.ZMUI.go('map', { from: 'game', focus: B }); });
   $('p-zoo').addEventListener('click', () => { if (window.ZMUI) window.ZMUI.openZoo({ from: 'game' }); });
   $('o-menu').addEventListener('click', () => { if (window.ZMUI) window.ZMUI.go('title'); });
   $('s-close').addEventListener('click', closePanels);
@@ -731,10 +807,12 @@
     get tune() { return Object.assign({}, tune); }, tuneDefaults: TUNE_DEF,
     setTune(o) { Object.assign(tune, o); syncTuneUI(); applyTune(); },
     aimEnd(xFrac, t) { const r = radius(t || current); return aimEnd(L.left + xFrac * L.Wi, r); },
-    get juice() { return { chain, lastMergeAt, comboLog: comboLog.slice(), combo: { window: COMBO_WIN, bonus: COMBO_BONUS }, danger, nearK: +nearK.toFixed(2), nearT: +nearT.toFixed(2), shake: Object.assign({}, shk), lastShake: lastShake.slice(), fx: fx.length, fxKinds: fx.reduce((o, f) => (o[f.k] = (o[f.k] || 0) + 1, o), {}), pops: [...animals].filter(b => b.zm.pop != null).length, buzz: buzzLog.slice(), card: cardOn ? Object.assign({}, cardOn) : null, cardQ: cardQ.length, cardLog: cardLog.slice() }; },
+    get juice() { return { chain, lastMergeAt, comboShown, comboOn: $('combo').classList.contains('on'), comboLog: comboLog.slice(), combo: { window: COMBO_WIN, bonus: COMBO_BONUS }, danger, nearK: +nearK.toFixed(2), nearT: +nearT.toFixed(2), shake: Object.assign({}, shk), lastShake: lastShake.slice(), fx: fx.length, fxKinds: fx.reduce((o, f) => (o[f.k] = (o[f.k] || 0) + 1, o), {}), pops: [...animals].filter(b => b.zm.pop != null).length, buzz: buzzLog.slice(), card: cardOn ? Object.assign({}, cardOn) : null, cardQ: cardQ.length, cardLog: cardLog.slice() }; },
     get perf() { return { avg: +perf.avg.toFixed(1), n: perf.n, low: perf.low, cap: perf.low ? FX_CAP_LOW : FX_CAP }; },
     setLow(v) { perf.forced = v == null ? null : !!v; perfSample(0.016); },
     dismissCard,
+    celebrate(b) { cbOpen(b == null ? B : b); }, cbHold(f) { if (!cb.on) return; cb.hold = f; cb.f = f; cbDraw(f); }, cbRelease() { cb.hold = null; cb.t0 = performance.now() - cb.f / CB_FPS * 1000; },
+    get cb() { return { on: cb.on, b: cb.b, f: cb.f, hold: cb.hold, log: cb.log.slice() }; },
     energy() { let e = 0, m = 0; for (const b of animals) { e += b.speed; m = Math.max(m, b.speed); } return { sum: e, max: m, n: animals.size }; },
   };
 
@@ -742,7 +820,7 @@
   let active = false, running = false, booted = false, needResize = false;
   function setBiome(b, first) {
     B = b; best = ls.get(lsKey(b, 'best'), 0) | 0; seen = new Set(ls.get(lsKey(b, 'seen'), []));
-    const th = THEME(KEYS[b]), src = b === 0 ? 'forest-bg.jpg' : `bg/${th}.png`;
+    const th = THEME(KEYS[b]), src = b === 0 ? 'forest-bg.jpg' : `bg/${th}.png${th === 'space' ? '?v=fd7' : ''}`; // v7: space art changed (planets removed)
     document.body.dataset.biome = th;                                     // ui-themes/themes.css: HUD, NEXT frame, strip
     const bg = document.getElementById('bg'); bg.style.backgroundImage = `url(${src})`; bg.classList.toggle('pix', b !== 0);
     bg.dataset.biome = th;
@@ -754,7 +832,7 @@
   window.ZMGame = {
     // mode 'new': fresh run. mode 'resume': back from the Zoopedia with the pause menu open.
     enter(mode, biome) {
-      active = true;
+      active = true; clearJuice();                                      // v7: no stale combo/banner animation on (re)entry
       const want = (mode === 'resume' || biome == null) ? B : Math.max(0, Math.min(D.length - 1, biome | 0));
       if (!booted) { booted = true; setBiome(want, true); renderStrip(); resize(true); reset(); }
       else {
@@ -765,7 +843,7 @@
       }
       startLoop();
     },
-    leave() { active = false; aiming = false; paused = true; elPause.classList.add('hidden'); },
+    leave() { active = false; aiming = false; paused = true; elPause.classList.add('hidden'); clearJuice(); cbClose(); },
     get active() { return active; },
     get best() { return best; },
     get biome() { return B; },
