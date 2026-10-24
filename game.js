@@ -27,6 +27,11 @@
   // Empty-board drop-to-floor at gravity 10, measured 0.85 s (tier 1; 390×844 and 440×956 match).
   // Cooldown is half of that fall, and scales with 1/sqrt(gravity) so it stays about half a fall as the slider moves.
   const FALL_G10 = 0.85;
+  // v6 juice / combo / danger tuning (documented in README)
+  const COMBO_WIN = 1.5;                         // s: a merge within this long after the previous one extends the chain
+  const COMBO_BONUS = 10;                        // the k-th merge of a chain (k >= 2) adds COMBO_BONUS * (k - 1) on top
+  const NEAR_HOLD = 0.25;                        // s an animal must sit near the line before the line starts pulsing
+  const FX_CAP = 260, FX_CAP_LOW = 110;          // particle caps (normal / low-end mode)
   const GRACE = 2.0, WARN = 0.5, BOX_RATIO = 1.12, SPAWN_ABOVE = 40, SCALE_IN = 0.12;
   const STEP = 1000 / 240;                       // fixed physics substep (ms): 240 Hz so fast falls never tunnel
   // Badge look. The circle (background fill, light rim, dark outline) is drawn as vector shapes at full device
@@ -56,7 +61,10 @@
   let best = ls.get(lsKey(0, 'best'), 0) | 0;
   let seen = new Set(ls.get(lsKey(0, 'seen'), []));
   const prefs = Object.assign({ vibration: true, sound: true, music: true }, ls.get(LS_PREFS, {})); // sound/music: placeholders for now
-  const buzz = ms => { try { if (prefs.vibration && navigator.vibrate) navigator.vibrate(ms); } catch (e) {} };
+  // haptics: navigator.vibrate where it exists (Android Chrome); iOS Safari has no Vibration API, so this is a silent no-op there
+  let buzzLog = [];
+  const buzz = ms => { buzzLog.push(ms); if (buzzLog.length > 20) buzzLog.shift(); try { if (prefs.vibration && navigator.vibrate) navigator.vibrate(ms); } catch (e) {} };
+  const reduceMotion = (() => { try { return matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) { return false; } })();
   const tune = Object.assign({}, TUNE_DEF, ls.get(LS_TUNE, {}));
   for (const k in TUNE_RANGE) { const [lo, hi] = TUNE_RANGE[k], v = +tune[k]; tune[k] = Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : TUNE_DEF[k]; }
 
@@ -106,14 +114,9 @@
 
   // ---- layout ----
   let L = {}, dpr = 1, lastBadgeDpr = 0;
-  function safeInsets() {
-    const p = document.createElement('div');
-    p.style.cssText = 'position:fixed;left:0;top:0;visibility:hidden;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)';
-    document.body.appendChild(p); const cs = getComputedStyle(p);
-    const r = { t: parseFloat(cs.paddingTop) || 0, b: parseFloat(cs.paddingBottom) || 0 }; p.remove(); return r;
-  }
+  function safeInsets() { const v = (window.ZMVP.last = window.ZMVP.measure()); return { t: v.st, b: v.sb, W: v.W, H: v.H, iw: v.iw, ih: v.ih }; }
   function computeLayout() {
-    const W = window.innerWidth, H = window.innerHeight, s = safeInsets();
+    const s = safeInsets(), W = s.W, H = s.H;   // v6: the fixed box's real size (see vp.js)
     const wall = Math.max(8, Math.round(W * 0.026));
     const Wi = W - 2 * wall;
     const stripTop = H - document.getElementById('strip').offsetHeight;
@@ -130,7 +133,7 @@
     const heldY = baseHeld + shift;
     const dangerY = heldY + gapHL;
     const floorY = Math.min(stripTop - minBand, dangerY + box);
-    return { W, H, wall, Wi, left: wall, right: W - wall, top, heldY, dangerY, floorY, stripTop,
+    return { W, H, iw: s.iw, ih: s.ih, wall, Wi, left: wall, right: W - wall, top, heldY, dangerY, floorY, stripTop,
              trunkEnd: floorY - Math.round(Wi * 0.035) };
   }
 
@@ -207,14 +210,24 @@
     ['#7f8ea0','#d4dbe3','#3c4652'],['#7a4e2c','#c79a62','#3f2714'],['#6b4226','#c08a55','#2b190c'],['#ffd75e','#fff3b0','#ff9f3a']];
   const MASH_COL = ['#ffd75e','#ff5a3c','#7dff6a','#5ecbff','#ff8ad4','#fff6d0','#ff9f3a','#ffffff','#c79a62'];
   let tierCols = TIER_COL;
+  // particle cap: the oldest pixel bits go first, rings/sparkles are kept
+  function capFx() { const cap = perf.low ? FX_CAP_LOW : FX_CAP; let over = fx.length - cap; for (let i = 0; over > 0 && i < fx.length; ) { if (fx[i].k === 'px') { fx.splice(i, 1); over--; } else i++; } }
+  function sparkles(x, y, r, t, n) {               // little 4-point pixel twinkles around the new animal
+    const cols = ['#ffffff', '#fff3b0', (tierCols[t - 1] || TIER_COL[t - 1])[1]];
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2, d = r * (0.75 + Math.random() * 0.6);
+      fx.push({ k: 'spark', x: Math.round(x + Math.cos(a) * d), y: Math.round(y + Math.sin(a) * d - 4), c: cols[i % 3], t0: now + Math.random() * 0.12, dur: 0.36 + Math.random() * 0.14 });
+    }
+  }
   function burst(x, y, r, t) {
     fx.push({ k: 'ring', x, y, r0: r * 0.8, r1: r * 1.7, t0: now, dur: 0.32 });
-    const cols = tierCols[t - 1] || TIER_COL[t - 1], n = 10 + Math.min(14, t * 2);
+    const cols = tierCols[t - 1] || TIER_COL[t - 1], n = Math.round((10 + Math.min(14, t * 2)) * (perf.low ? 0.5 : 1));
     for (let i = 0; i < n; i++) {
       const a = (i / n) * Math.PI * 2 + Math.random() * 0.5, sp = (90 + Math.random() * 150) * (0.7 + r / 120);
       fx.push({ k: 'px', x: x + Math.cos(a) * r * 0.6, y: y + Math.sin(a) * r * 0.6, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 60,
         c: cols[i % cols.length], s: Math.random() < 0.4 ? 6 : 4, t0: now, dur: 0.35 + Math.random() * 0.25 });
     }
+    sparkles(x, y, r, t, (perf.low ? 3 : 5) + Math.min(5, t >> 1)); capFx();
     const sc = document.getElementById('score').parentNode; sc.classList.remove('pulse', 'pulse-big'); void sc.offsetWidth; sc.classList.add('pulse');
   }
   function drawFx(dt) {
@@ -225,6 +238,11 @@
         const rr = Math.round((f.r0 + (f.r1 - f.r0) * Math.min(1, a * 1.15)) / 2) * 2;
         ctx.globalAlpha = 0.85 * (1 - a); ctx.strokeStyle = '#fff'; ctx.lineWidth = 4 * (1 - a) + 1.5;
         ctx.beginPath(); ctx.arc(f.x, f.y, rr, 0, Math.PI * 2); ctx.stroke();
+      } else if (f.k === 'spark') {                         // stepped 3-frame twinkle: dot, plus, big plus, plus
+        const st = [0, 1, 2, 1][Math.min(3, Math.floor(a * 4))], P = 2; ctx.globalAlpha = 1; ctx.fillStyle = f.c;
+        ctx.fillRect(f.x - P / 2, f.y - P / 2, P, P);
+        if (st >= 1) { ctx.fillRect(f.x - P / 2 - P, f.y - P / 2, P, P); ctx.fillRect(f.x + P / 2, f.y - P / 2, P, P); ctx.fillRect(f.x - P / 2, f.y - P / 2 - P, P, P); ctx.fillRect(f.x - P / 2, f.y + P / 2, P, P); }
+        if (st >= 2) { ctx.fillRect(f.x - P / 2 - 2 * P, f.y - P / 2, P, P); ctx.fillRect(f.x + P / 2 + P, f.y - P / 2, P, P); ctx.fillRect(f.x - P / 2, f.y - P / 2 - 2 * P, P, P); ctx.fillRect(f.x - P / 2, f.y + P / 2 + P, P, P); }
       } else {
         if (!paused && !gameOver) { f.x += f.vx * dt; f.y += f.vy * dt; f.vy += 600 * dt; f.vx *= 0.96; }
         ctx.globalAlpha = 1 - a * a; ctx.fillStyle = f.c; ctx.fillRect(Math.round(f.x), Math.round(f.y), f.s, f.s);
@@ -233,17 +251,18 @@
     ctx.restore();
   }
   // Tier-11 pair vanishes: big multi-colour pixel burst, "ZOO MASH!" banner, +250 popup.
-  // Does not pause the game or extend the drop cooldown. No shake, no sound.
+  // Does not pause the game or extend the drop cooldown. A small 5px shake (v6), no sound.
   function celebrateBoss(x, y, pts) {
     const r = radius(11);
     fx.push({ k: 'ring', x, y, r0: r * 0.35, r1: r * 2.4, t0: now, dur: 0.48 });
     fx.push({ k: 'ring', x, y, r0: r * 0.7, r1: r * 3.3, t0: now, dur: 0.72 });
-    const n = 108;
+    const n = perf.low ? 54 : 108;
     for (let i = 0; i < n; i++) {
       const a = (i / n) * Math.PI * 2 + (Math.random() - 0.5) * 0.35, sp = 180 + Math.random() * 420;
       fx.push({ k: 'px', x: x + Math.cos(a) * r * 0.2, y: y + Math.sin(a) * r * 0.2, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 110,
         c: MASH_COL[i % MASH_COL.length], s: i % 5 === 0 ? 8 : (i % 2 ? 6 : 4), t0: now, dur: 0.8 + Math.random() * 0.55 });
     }
+    capFx(); shake(5, 0.34);
     pops.push({ x, y, t0: now, txt: '+' + pts, boss: true });
     const ban = $('mash');
     ban.classList.remove('on'); void ban.offsetWidth; ban.classList.add('on');
@@ -266,13 +285,38 @@
       else {
         const nt = t + 1, r = radius(nt);
         const x = Math.min(L.right - r, Math.max(L.left + r, mx)), y = Math.min(L.floorY - r, my);
-        makeAnimal(nt, x, y, vx, vy, false);
+        const nb = makeAnimal(nt, x, y, vx, vy, false); nb.zm.pop = now;      // squash/pop on the new animal
         pts = POINTS(nt);
         pops.push({ x, y, t0: now, txt: '+' + pts }); burst(x, y, r, nt);
-        buzz(12);
+        if (nt >= 9) shake(nt - 7, 0.22);                                   // tiers 9/10/11: 2/3/4 px
+        buzz(nt >= 9 ? 22 : 10);
       }
       addScore(pts);
+      combo(mx, my);
     }
+  }
+  // ---- combo chains: merges within COMBO_WIN of each other ----
+  let chain = 0, lastMergeAt = -9, comboLog = [];
+  function combo(x, y) {
+    chain = now - lastMergeAt <= COMBO_WIN ? chain + 1 : 1; lastMergeAt = now;
+    if (chain < 2) return;
+    const bonus = COMBO_BONUS * (chain - 1);
+    score += bonus; elScore.textContent = score.toLocaleString('en-US');
+    if (score > best) { best = score; ls.set(lsKey(B, 'best'), best); elBest.textContent = best.toLocaleString('en-US'); }
+    comboLog.push({ n: chain, bonus, t: +now.toFixed(2) }); if (comboLog.length > 30) comboLog.shift();
+    const el = $('combo'); el.querySelector('b').textContent = 'COMBO x' + chain + '!'; el.querySelector('i').textContent = '+' + bonus;
+    el.classList.toggle('hot', chain >= 4);
+    el.classList.remove('on'); void el.offsetWidth; el.classList.add('on');
+    if (chain >= 3) buzz([8, 30, 8]);
+  }
+  // ---- screen shake: integer-pixel offsets, stepped at ~30 Hz, decaying; off for prefers-reduced-motion ----
+  let shk = { a: 0, t0: -9, dur: 0 };
+  function shake(a, dur) { if (reduceMotion) return; if (a >= shk.a * Math.max(0, 1 - (now - shk.t0) / (shk.dur || 1))) shk = { a, t0: now, dur }; }
+  function shakeOffset() {
+    const q = (now - shk.t0) / shk.dur; if (!(q >= 0 && q < 1) || !shk.a) return [0, 0];
+    const st = Math.floor((now - shk.t0) * 30), amp = Math.max(1, Math.round(shk.a * (1 - q)));
+    const h = (n) => { const v = Math.sin(n * 12.9898 + st * 78.233) * 43758.5453; return v - Math.floor(v); };
+    return [Math.round((h(1) * 2 - 1) * amp), Math.round((h(2) * 2 - 1) * amp)];
   }
 
   // ---- game state ----
@@ -291,13 +335,38 @@
   }
   function setNextUI() { elNext.src = spriteSrc(next); }
 
-  function markSeen(t) {
-    if (seen.has(t)) return;
+  // quiet = only previewed in the NEXT/current queue: the card waits until that animal actually lands on the board
+  const cardPend = new Set();
+  function markSeen(t, quiet) {
+    if (seen.has(t)) { if (!quiet && cardPend.delete(t)) newCard(t); return; }
     seen.add(t); ls.set(lsKey(B, 'seen'), [...seen].sort((a, b) => a - b));
     renderStrip(t);
+    if (quiet) cardPend.add(t); else newCard(t);
     // progression: reaching this biome's tier-11 animal unlocks the next biome on the map
     if (t === 11 && B < D.length - 1) toast(D[B + 1].name + ' UNLOCKED!');
   }
+  // ---- "NEW ANIMAL!" card: first time a tier is created in a biome (not shown for entries Unlock all revealed) ----
+  const cardQ = []; let cardOn = null, cardT = 0, cardLog = [];
+  function newCard(t) {
+    if (ls.get('zoomash.demo.unlockAll', false)) return;
+    cardQ.push({ b: B, t }); if (!cardOn) nextCard();
+  }
+  function nextCard() {
+    clearTimeout(cardT); const el = $('newcard');
+    const c = cardQ.shift(); cardOn = c || null;
+    if (!c) { el.classList.remove('on'); el.classList.add('hidden'); return; }
+    const a = D[c.b].animals[c.t - 1];
+    el.querySelector('img').src = spriteSrc(c.t);
+    el.querySelector('.nc-name').textContent = a.n.toUpperCase();
+    el.querySelector('.nc-no').textContent = 'No.' + String(c.b * 11 + c.t).padStart(2, '0');
+    el.classList.remove('hidden', 'on'); void el.offsetWidth; el.classList.add('on');
+    cardLog.push({ b: c.b, t: c.t, no: c.b * 11 + c.t, name: a.n }); if (cardLog.length > 40) cardLog.shift();
+    buzz([12, 40, 12]);
+    cardT = setTimeout(nextCard, cardQ.length ? 1400 : 2300);         // auto-dismiss (faster when more are waiting)
+  }
+  function dismissCard() { if (cardOn) { cardQ.length = 0; nextCard(); } }
+  $('newcard').addEventListener('pointerdown', e => { e.stopPropagation(); dismissCard(); });
+  setInterval(() => { if (cardOn) { const im = $('newcard').querySelector('img'); if (im.src === BLANK || !im.src || im.src.endsWith('gif;base64,' + BLANK.split(',')[1])) im.src = spriteSrc(cardOn.t); } }, 250);
   function renderStrip(popTier) {
     const W = window.innerWidth;
     const slot = Math.max(22, Math.min(34, Math.floor((Math.min(W, 420) - 28 - 10 * 3) / 11)));
@@ -325,14 +394,14 @@
 
   function reset() {
     for (const b of [...animals]) removeAnimal(b);
-    mergeQ = []; pops.length = 0; fx.length = 0; lastDrop = null; fallTime = 0;
+    mergeQ = []; pops.length = 0; fx.length = 0; lastDrop = null; fallTime = 0; chain = 0; lastMergeAt = -9; shk.a = 0; nearT = 0; danger = 'none';
     score = 0; elScore.textContent = '0'; elBest.textContent = best.toLocaleString('en-US');
-    current = rnd(); next = rnd(); setNextUI(); markSeen(current);
+    current = rnd(); next = rnd(); setNextUI(); cardPend.clear(); markSeen(current, true);
     aimX = L.W / 2; canDropAt = now + 0.2; gameOver = false; paused = false; warnOn = false; dropsTotal = mergesTotal = 0;
     elOver.classList.add('hidden'); elPause.classList.add('hidden'); elSet.classList.add('hidden');
   }
   function endGame() {
-    gameOver = true; aiming = false;
+    gameOver = true; aiming = false; cardQ.length = 0; nextCard();
     $('o-score').textContent = score.toLocaleString('en-US');
     $('o-best').textContent = best.toLocaleString('en-US');
     $('o-new').classList.toggle('hidden', !(score > 0 && score >= best));
@@ -340,21 +409,27 @@
   }
 
   // ---- danger check ----
+  // near: a settled animal's top within ~one small-animal height under the line, for NEAR_HOLD s -> the line pulses red
+  let nearT = 0, danger = 'none', nearK = 0;
   function checkDanger(dt) {
-    let maxAbove = 0;
+    let maxAbove = 0, gap = Infinity; const nearPx = Math.max(radius(3) * 2.2, L.Wi * 0.12);
     for (const b of animals) {
       const z = b.zm;
       if (z.fresh) { z.above = 0; continue; }
       if (b.position.y - z.r < L.dangerY) z.above += dt; else z.above = 0;
       if (z.above > maxAbove) maxAbove = z.above;
+      if (b.speed < 6) gap = Math.min(gap, b.position.y - z.r - L.dangerY);
     }
+    nearT = gap < nearPx ? nearT + dt : 0;
+    nearK = gap < nearPx ? Math.min(1, Math.max(0, 1 - gap / nearPx)) : 0;
     warnOn = maxAbove >= WARN;
+    danger = warnOn ? 'warn' : nearT >= NEAR_HOLD ? 'near' : 'none';
     if (maxAbove >= GRACE && !gameOver) endGame();
   }
 
   // ---- input ----
   function px(e) { return e.clientX; }
-  canvas.addEventListener('pointerdown', e => { if (gameOver || paused) return; aiming = true; aimX = px(e); try { canvas.setPointerCapture(e.pointerId); } catch (_) {} e.preventDefault(); });
+  canvas.addEventListener('pointerdown', e => { dismissCard(); if (gameOver || paused) return; aiming = true; aimX = px(e); try { canvas.setPointerCapture(e.pointerId); } catch (_) {} e.preventDefault(); });
   canvas.addEventListener('pointermove', e => { if (!aiming) return; aimX = px(e); e.preventDefault(); });
   const up = e => { if (!aiming) return; aiming = false; aimX = px(e); drop(); e.preventDefault(); };
   canvas.addEventListener('pointerup', up);
@@ -421,7 +496,7 @@
   }
   let rzT; window.addEventListener('resize', () => { clearTimeout(rzT); rzT = setTimeout(() => { if (active) resize(false); else needResize = true; }, 120); });
 
-  // ---- static decor (pre-rendered pixel art: trunks + forest floor) ----
+  // ---- static decor (pre-rendered pixel art: side posts + flat floor slab) ----
   let decor = null;
   // per-biome palette for the floor band, its lip and the two side posts (Forest = the approved v4 look)
   const DECOR = {
@@ -449,23 +524,16 @@
     const w = Math.ceil(L.W / P), h = Math.ceil(L.H / P);
     decor.width = w; decor.height = h; const g = decor.getContext('2d');
     let seed = 1337; const R = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
-    // forest floor band
+    // v6 floor: one flat pixel slab in every biome (no grass, no speckle) - a dark outline, a 1-px highlight on top, a
+    // solid face and a darker bottom edge - tinted to the biome's side posts so posts + floor read as one open-topped box
     const fy = Math.round(L.floorY / P), sy = Math.ceil(L.stripTop / P) + 1;
-    // translucent earth so the painted forest floor in the backdrop shows through
-    for (let y = fy; y < sy; y++) { const k = (y - fy) / Math.max(1, sy - fy); g.fillStyle = `rgba(${Pal.earth.join(',')},${(0.30 + 0.35 * k).toFixed(3)})`; g.fillRect(0, y, w, 1); }
-    for (let i = 0; i < w * (sy - fy) / 40; i++) { const x = (R() * w) | 0, y = fy + 2 + ((R() * Math.max(1, sy - fy - 3)) | 0);
-      g.fillStyle = R() < .5 ? Pal.spk[0] : Pal.spk[1]; g.fillRect(x, y, 1 + (R() < .3), 1); }
-    for (let i = 0; i < w / 14; i++) { const x = (R() * w) | 0, y = fy + 4 + ((R() * Math.max(1, sy - fy - 7)) | 0);
-      g.fillStyle = Pal.stone[0]; g.fillRect(x, y, 3, 2); g.fillStyle = Pal.stone[1]; g.fillRect(x, y, 2, 1); }
-    g.fillStyle = 'rgba(0,0,0,.3)'; g.fillRect(0, fy, w, 2);
-    // grass lip
-    for (let x = 0; x < w; x++) {
-      const hgt = 1 + ((R() * 3) | 0);
-      g.fillStyle = Pal.lip[0]; g.fillRect(x, fy - hgt, 1, hgt + 1);
-      if (R() < .35) { g.fillStyle = Pal.lip[1]; g.fillRect(x, fy - hgt - 1, 1, 1); }
-    }
+    g.fillStyle = Pal.edge; g.fillRect(0, fy - 1, w, 1);
+    g.fillStyle = Pal.hl; g.fillRect(0, fy, w, 1);
+    g.fillStyle = Pal.bark[1]; g.fillRect(0, fy + 1, w, Math.max(1, sy - fy - 2));
+    g.fillStyle = Pal.bark[3]; g.fillRect(0, sy - 2, w, 1);
+    g.fillStyle = Pal.edge; g.fillRect(0, sy - 1, w, 1);
     // trunks
-    const tw = Math.ceil(L.wall / P) + 2, ty0 = Math.floor(L.top / P), ty1 = Math.round(L.trunkEnd / P);
+    const tw = Math.ceil(L.wall / P) + 2, ty0 = 0, ty1 = Math.round(L.floorY / P) - 1;   // v6: posts run from the top edge into the floor
     const bark = Pal.bark;
     for (const side of [0, 1]) {
       for (let y = ty0; y < ty1; y++) for (let i = 0; i < tw; i++) {
@@ -479,9 +547,8 @@
         else if (!Pal.nodes && !Pal.rivets && (y + i * 3) % 7 === 0) c = bark[3]; // bark grooves
         g.fillStyle = c; g.fillRect(x, y, 1, 1);
       }
-      // rounded/root tip where the trunk stops short of the ground
-      g.fillStyle = Pal.edge;
-      for (let i = 0; i < tw; i++) { const x = side ? w - 1 - i : i; g.fillRect(x, ty1, 1, 1 + (i < tw - 2 ? 1 : 0)); }
+      // small pixel cap at the top edge: a 1-px highlight row over a dark row
+      for (let i = 0; i < tw; i++) { const x = side ? w - 1 - i : i; g.fillStyle = Pal.hl; g.fillRect(x, 0, 1, 1); g.fillStyle = Pal.edge; g.fillRect(x, 1, 1, 1); }
     }
   }
 
@@ -542,12 +609,14 @@
       g.clearRect(0, 0, px, px); paintBadge(g, i + 1, px / 2, px / 2, (px / 2 - 0.5) / ov); return c.toDataURL('image/png'); });
     if (B) window.ZMArt.forget(B);
   }
-  function drawSprite(t, x, y, r, ang = 0, scale = 1) {
+  // squash/pop frames (sx, sy), 50 ms each: pop in small, squash wide, stretch tall, settle
+  const POP_FR = [[0.82, 0.82], [1.2, 0.84], [0.9, 1.12], [1.05, 0.97], [1, 1]];
+  function drawSprite(t, x, y, r, ang = 0, scale = 1, scaleY = scale) {
     const c = badgeCanvas(t, r); if (!c) return;
     const w = c.width / dpr;
     ctx.save(); ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
-    if (!ang && scale === 1) { x = Math.round(x * dpr) / dpr; y = Math.round(y * dpr) / dpr; } // unrotated: land on device pixels
-    ctx.translate(x, y); if (ang) ctx.rotate(ang); if (scale !== 1) ctx.scale(scale, scale);
+    if (!ang && scale === 1 && scaleY === 1) { x = Math.round(x * dpr) / dpr; y = Math.round(y * dpr) / dpr; } // unrotated: land on device pixels
+    ctx.translate(x, y); if (scaleY !== scale) { ctx.scale(scale, scaleY); if (ang) ctx.rotate(ang); } else { if (ang) ctx.rotate(ang); if (scale !== 1) ctx.scale(scale, scale); }
     ctx.drawImage(c, -w / 2, -w / 2, w, w); ctx.restore();
   }
   // where the held animal's bottom would first touch an animal (anywhere under its footprint) or the floor
@@ -565,12 +634,21 @@
   function render() {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, L.W, L.H);
+    const [sx0, sy0] = shakeOffset(); lastShake = [sx0, sy0];
+    if (sx0 || sy0) ctx.setTransform(dpr, 0, 0, dpr, sx0 * dpr, sy0 * dpr);
     ctx.imageSmoothingEnabled = false;
     if (decor) ctx.drawImage(decor, 0, 0, decor.width * 2, decor.height * 2);
     // danger line
     ctx.save();
     const flash = warnOn && Math.floor(now * 6) % 2 === 0;
-    ctx.strokeStyle = flash ? '#ff2a1a' : 'rgba(214,64,40,.9)'; ctx.lineWidth = flash ? 3 : 2;
+    if (danger === 'near' && !gameOver) {
+      // stepped red pulse (4 steps, faster the closer the stack is), plus a 2-row pixel glow band above the line
+      const hz = 1.6 + nearK * 1.6, st = [0, 1, 2, 1][Math.floor(now * hz * 4) % 4];
+      const col = ['#c8402c', '#e8301e', '#ff2a1a'][st];
+      ctx.fillStyle = col; ctx.globalAlpha = [0.12, 0.22, 0.32][st];
+      ctx.fillRect(L.left, L.dangerY - 6, L.right - L.left, 4); ctx.globalAlpha = [0.06, 0.12, 0.18][st]; ctx.fillRect(L.left, L.dangerY - 10, L.right - L.left, 4);
+      ctx.globalAlpha = 1; ctx.strokeStyle = col; ctx.lineWidth = 2 + st;
+    } else { ctx.strokeStyle = flash ? '#ff2a1a' : 'rgba(214,64,40,.9)'; ctx.lineWidth = flash ? 3 : 2; }
     ctx.setLineDash([8, 6]); ctx.beginPath(); ctx.moveTo(L.left, L.dangerY); ctx.lineTo(L.right, L.dangerY); ctx.stroke();
     ctx.restore();
     // held animal + aim line
@@ -586,9 +664,10 @@
     }
     // animals
     for (const b of animals) {
-      const age = now - b.zm.born; const s = age < SCALE_IN && !b.zm.fresh ? 0.6 + 0.4 * (age / SCALE_IN) : 1;
+      const age = now - b.zm.born; let s = age < SCALE_IN && !b.zm.fresh ? 0.6 + 0.4 * (age / SCALE_IN) : 1, sy = s;
+      if (b.zm.pop != null) { const q = now - b.zm.pop, f = POP_FR[Math.floor(q / 0.05)]; if (f) { s = f[0]; sy = f[1]; } else b.zm.pop = null; }
       if (b.zm.above > WARN && warnOn) { ctx.save(); ctx.globalAlpha = 0.35; ctx.fillStyle = '#ff2a1a'; ctx.beginPath(); ctx.arc(b.position.x, b.position.y, b.zm.r + 3, 0, 7); ctx.fill(); ctx.restore(); }
-      drawSprite(b.zm.tier, b.position.x, b.position.y, b.zm.r, b.angle, s);
+      drawSprite(b.zm.tier, b.position.x, b.position.y, b.zm.r, b.angle, s, sy);
     }
     drawFx(renderDt);
     // score pops
@@ -603,6 +682,17 @@
     ctx.restore();
   }
 
+  // ---- low-end check: a running average of frame time; if a phone can't hold ~45 fps after a 2 s warm-up, switch to
+  // low-FX mode for the session (half the particles, fewer sparkles, ambient backdrop at 4 fps with fewer flakes) ----
+  const perf = { avg: 16.7, n: 0, low: false, forced: null };
+  try { if (/[?&]lowfx=1/.test(location.search)) perf.forced = true; } catch (e) {}
+  function perfSample(dt) {
+    if (dt <= 0 || dt >= 0.1) return;                                   // ignore hitches (tab switches, GC) entirely
+    perf.n++; perf.avg += (dt * 1000 - perf.avg) * 0.05;
+    const low = perf.forced != null ? perf.forced : (perf.low || (perf.n > 120 && perf.avg > 22));
+    if (low !== perf.low) { perf.low = low; if (window.ZMAmb && window.ZMAmb.setLow) window.ZMAmb.setLow(low); }
+  }
+  let lastShake = [0, 0];
   // ---- loop ----
   let last = performance.now(), acc = 0;
   const angK = Math.exp(-PHYS.angularDamping * STEP / 1000);
@@ -610,6 +700,8 @@
   function frame(t) {
     if (!active) { running = false; return; }
     let dt = Math.min(0.1, (t - last) / 1000); last = t;
+    if (document.hidden) { requestAnimationFrame(frame); return; }      // tab in background: no physics, no drawing
+    perfSample(dt);
     if (!paused && !gameOver) {
       acc += dt * 1000;
       while (acc >= STEP) {
@@ -639,6 +731,10 @@
     get tune() { return Object.assign({}, tune); }, tuneDefaults: TUNE_DEF,
     setTune(o) { Object.assign(tune, o); syncTuneUI(); applyTune(); },
     aimEnd(xFrac, t) { const r = radius(t || current); return aimEnd(L.left + xFrac * L.Wi, r); },
+    get juice() { return { chain, lastMergeAt, comboLog: comboLog.slice(), combo: { window: COMBO_WIN, bonus: COMBO_BONUS }, danger, nearK: +nearK.toFixed(2), nearT: +nearT.toFixed(2), shake: Object.assign({}, shk), lastShake: lastShake.slice(), fx: fx.length, fxKinds: fx.reduce((o, f) => (o[f.k] = (o[f.k] || 0) + 1, o), {}), pops: [...animals].filter(b => b.zm.pop != null).length, buzz: buzzLog.slice(), card: cardOn ? Object.assign({}, cardOn) : null, cardQ: cardQ.length, cardLog: cardLog.slice() }; },
+    get perf() { return { avg: +perf.avg.toFixed(1), n: perf.n, low: perf.low, cap: perf.low ? FX_CAP_LOW : FX_CAP }; },
+    setLow(v) { perf.forced = v == null ? null : !!v; perfSample(0.016); },
+    dismissCard,
     energy() { let e = 0, m = 0; for (const b of animals) { e += b.speed; m = Math.max(m, b.speed); } return { sum: e, max: m, n: animals.size }; },
   };
 
@@ -663,7 +759,7 @@
       if (!booted) { booted = true; setBiome(want, true); renderStrip(); resize(true); reset(); }
       else {
         if (want !== B || !document.body.dataset.biome) setBiome(want);
-        if (needResize || window.innerWidth !== L.W || window.innerHeight !== L.H) { needResize = false; resize(false); }
+        if (needResize || window.innerWidth !== L.iw || window.innerHeight !== L.ih) { needResize = false; resize(false); }
         if (mode === 'resume' && !gameOver) { renderStrip(); openPanel(elPause); }
         else reset();
       }

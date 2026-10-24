@@ -13,9 +13,9 @@
 <link rel="icon" href="icon-512.png">
 <link rel="manifest" href="manifest.webmanifest">
 <title>Zoo Mash</title>
-<link rel="stylesheet" href="style.css?v=fd5">
-<link rel="stylesheet" href="ui.css?v=fd5">
-<link rel="stylesheet" href="ui-themes/themes.css?v=fd5">
+<link rel="stylesheet" href="style.css?v=fd6">
+<link rel="stylesheet" href="ui.css?v=fd6">
+<link rel="stylesheet" href="ui-themes/themes.css?v=fd6">
 </head>
 <body>
 <div id="scr-title" class="screen" data-screen="title">
@@ -38,7 +38,7 @@
 </div>
 <div id="scr-zoo" class="screen hidden" data-screen="zoo">
   <canvas id="zoo-cv" class="fullcv"></canvas>
-  <div class="hdr green"><button class="wbtn back" aria-label="Back"><svg viewBox="0 0 16 16" shape-rendering="crispEdges"><path fill="currentColor" d="M2 8l6-6v4h6v4H8v4z"/></svg></button><div class="htitle">ZOOPEDIA</div><button class="iconbtn gearbtn" aria-label="Settings"><svg viewBox="0 0 24 24"><g fill="currentColor"><rect x="10" y="1" width="4" height="6" transform="rotate(0 12 12)"/><rect x="10" y="1" width="4" height="6" transform="rotate(45 12 12)"/><rect x="10" y="1" width="4" height="6" transform="rotate(90 12 12)"/><rect x="10" y="1" width="4" height="6" transform="rotate(135 12 12)"/><rect x="10" y="1" width="4" height="6" transform="rotate(180 12 12)"/><rect x="10" y="1" width="4" height="6" transform="rotate(225 12 12)"/><rect x="10" y="1" width="4" height="6" transform="rotate(270 12 12)"/><rect x="10" y="1" width="4" height="6" transform="rotate(315 12 12)"/><circle cx="12" cy="12" r="7.5"/></g><circle cx="12" cy="12" r="3.2" fill="#121610"/></svg></button></div>
+  <div class="hdr green"><button class="wbtn back" aria-label="Back"><svg viewBox="0 0 16 16" shape-rendering="crispEdges"><path fill="currentColor" d="M2 8l6-6v4h6v4H8v4z"/></svg></button><div class="htitle">ZOOPEDIA</div><div id="zoo-hcount" class="hcount" aria-label="Animals found"><span id="zoo-hn">0</span>/88</div><button class="iconbtn gearbtn" aria-label="Settings"><svg viewBox="0 0 24 24"><g fill="currentColor"><rect x="10" y="1" width="4" height="6" transform="rotate(0 12 12)"/><rect x="10" y="1" width="4" height="6" transform="rotate(45 12 12)"/><rect x="10" y="1" width="4" height="6" transform="rotate(90 12 12)"/><rect x="10" y="1" width="4" height="6" transform="rotate(135 12 12)"/><rect x="10" y="1" width="4" height="6" transform="rotate(180 12 12)"/><rect x="10" y="1" width="4" height="6" transform="rotate(225 12 12)"/><rect x="10" y="1" width="4" height="6" transform="rotate(270 12 12)"/><rect x="10" y="1" width="4" height="6" transform="rotate(315 12 12)"/><circle cx="12" cy="12" r="7.5"/></g><circle cx="12" cy="12" r="3.2" fill="#121610"/></svg></button></div>
   <div id="zoo-count" class="plank"><span id="zoo-n">0</span>/88 ANIMALS FOUND</div>
   <div id="book">
     <canvas id="book-cv" aria-hidden="true"></canvas><canvas id="book-tab" aria-hidden="true"></canvas>
@@ -61,6 +61,7 @@
   <canvas id="game"></canvas>
   <div id="topbar">
     <div class="stat">SCORE <span id="score">0</span></div>
+    <div id="next"><div class="lbl">NEXT</div><img id="next-img" alt=""></div>
     <div class="stat">BEST <span id="best">0</span></div>
     <button id="pause" class="iconbtn" aria-label="Pause">
       <svg viewBox="0 0 24 24" shape-rendering="crispEdges"><g fill="currentColor"><rect x="5" y="4" width="5" height="16"/><rect x="14" y="4" width="5" height="16"/></g></svg>
@@ -79,7 +80,8 @@
     </div>
   </div>
   <div id="mash">ZOO MASH!</div>
-  <div id="next"><div class="lbl">NEXT</div><img id="next-img" alt=""></div>
+  <div id="combo" aria-live="polite"><b>COMBO x2!</b><i>+10</i></div>
+  <div id="newcard" class="hidden" role="status" aria-live="polite"><div class="nc-h">NEW ANIMAL!</div><div class="nc-row"><div class="nc-b"><img alt=""></div><div class="nc-t"><div class="nc-no"></div><div class="nc-name"></div></div></div></div>
   <div id="strip"><div id="slots"></div></div>
   <div id="over" class="hidden">
     <div class="panel">
@@ -127,10 +129,11 @@
 <div id="toast" class="hidden"></div>
 <div id="rotate">Turn your phone upright to play</div>
 <script src="matter.min.js"></script>
-<script src="data.js?v=fd5"></script>
-<script src="art.js?v=fd5"></script>
-<script src="ambient.js?v=fd5"></script>
-<script src="game.js?v=fd5"></script>
-<script src="ui.js?v=fd5"></script>
+<script src="data.js?v=fd6"></script>
+<script src="art.js?v=fd6"></script>
+<script src="ambient.js?v=fd6"></script>
+<script src="vp.js?v=fd6"></script>
+<script src="game.js?v=fd6"></script>
+<script src="ui.js?v=fd6"></script>
 </body>
 </html>

@@ -65,7 +65,9 @@ img.smooth{image-rendering:auto}
 
 /* zoopedia */
 #scr-zoo{background:#6b3f1d}
-#zoo-count{position:absolute;left:50%;transform:translateX(-50%);top:calc(7.2rem + var(--st));z-index:3}
+#zoo-count{position:absolute;left:50%;transform:translateX(-50%) translateZ(0);top:calc(7.2rem + var(--st));z-index:6}
+/* v6: x/88 badge in the Zoopedia header bar (always visible, even if the plank is crowded out) */
+.hcount{flex:0 0 auto;font-weight:700;font-size:1.9rem;color:#3a1d08;background:#ffd75e;border:.3rem solid #3a1d08;padding:.35rem .7rem .25rem;box-shadow:0 0 0 .2rem #fff3b0 inset,.25rem .25rem 0 rgba(0,0,0,.35);white-space:nowrap;line-height:1}
 .plank{background:#c58a4a;border:.3rem solid #4a2a10;border-radius:.4rem;padding:.8rem 2rem;font-size:1.9rem;font-weight:700;color:#3a1d08;white-space:nowrap;
   box-shadow:0 -.4rem 0 #a06a33 inset,0 .3rem 0 #e2b07a inset,0 .3rem 0 rgba(0,0,0,.35)}
 /* the book: a pixel-painted hardcover lying open on the desk (canvas), pages + turning leaf as DOM on top */
@@ -111,7 +113,12 @@ img.smooth{image-rendering:auto}
 #leaf .face{position:absolute;inset:0;backface-visibility:hidden;-webkit-backface-visibility:hidden;background:0 0/100% 100% no-repeat;image-rendering:pixelated}
 #leaf .face.page.left{background-image:var(--pgL)}
 #leaf .face.page.right{background-image:var(--pgR)}
-#leaf .face.back{transform:rotateY(180deg);-webkit-transform:rotateY(180deg)}
+#leaf .face.back{transform:rotateY(180deg);-webkit-transform:rotateY(180deg);visibility:hidden}
+/* v6: faces swap by class at the edge-on midpoint (no reliance on backface-visibility); cached pages are moved in as .pgw wrappers */
+#leaf.half .face.front{visibility:hidden}
+#leaf.half .face.back{visibility:visible}
+.pgw{display:contents}
+.spread.zwait .page{visibility:hidden}
 #leaf .face::after,.spread.turning .page:not(.face)::before{-webkit-mask:var(--pgR) 0 0/100% 100% no-repeat;mask:var(--pgR) 0 0/100% 100% no-repeat}
 #leaf .face.left::after,.spread.turning .page.left:not(.face)::before{-webkit-mask-image:var(--pgL);mask-image:var(--pgL)}
 #leaf .face::after{content:"";position:absolute;inset:0;pointer-events:none;opacity:0}
