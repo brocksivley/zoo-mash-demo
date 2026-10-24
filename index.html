@@ -13,8 +13,8 @@
 <link rel="icon" href="icon-512.png">
 <link rel="manifest" href="manifest.webmanifest">
 <title>Zoo Mash</title>
-<link rel="stylesheet" href="style.css?v=fd2">
-<link rel="stylesheet" href="ui.css?v=fd2">
+<link rel="stylesheet" href="style.css?v=fd3">
+<link rel="stylesheet" href="ui.css?v=fd3">
 </head>
 <body>
 <div id="scr-title" class="screen" data-screen="title">
@@ -40,17 +40,13 @@
   <div class="hdr green"><button class="wbtn back" aria-label="Back"><svg viewBox="0 0 16 16" shape-rendering="crispEdges"><path fill="currentColor" d="M2 8l6-6v4h6v4H8v4z"/></svg></button><div class="htitle">ZOOPEDIA</div><button class="iconbtn gearbtn" aria-label="Settings"><svg viewBox="0 0 24 24"><g fill="currentColor"><rect x="10" y="1" width="4" height="6" transform="rotate(0 12 12)"/><rect x="10" y="1" width="4" height="6" transform="rotate(45 12 12)"/><rect x="10" y="1" width="4" height="6" transform="rotate(90 12 12)"/><rect x="10" y="1" width="4" height="6" transform="rotate(135 12 12)"/><rect x="10" y="1" width="4" height="6" transform="rotate(180 12 12)"/><rect x="10" y="1" width="4" height="6" transform="rotate(225 12 12)"/><rect x="10" y="1" width="4" height="6" transform="rotate(270 12 12)"/><rect x="10" y="1" width="4" height="6" transform="rotate(315 12 12)"/><circle cx="12" cy="12" r="7.5"/></g><circle cx="12" cy="12" r="3.2" fill="#121610"/></svg></button></div>
   <div id="zoo-count" class="plank"><span id="zoo-n">0</span>/88 ANIMALS FOUND</div>
   <div id="book">
+    <canvas id="book-cv" aria-hidden="true"></canvas><canvas id="book-tab" aria-hidden="true"></canvas>
     <div id="tabs" role="tablist" aria-label="Biomes"></div>
-    <div class="cover"><i class="cnr tl"></i><i class="cnr tr"></i><i class="cnr bl"></i><i class="cnr br"></i>
-      <div class="spread" id="spread">
-        <div class="stack sl"></div><div class="stack sr"></div><div class="stack sb"></div>
-        <div class="page left" id="pg-l"></div><div class="page right" id="pg-r"></div>
-        <div class="spine"></div>
-        <div id="leaf" class="hidden"><div class="face front"></div><div class="face back"></div></div>
-        <button class="corner cl" id="zoo-cl" aria-label="Turn back a page"></button><button class="corner cr" id="zoo-cr" aria-label="Turn the page"></button>
-      </div>
+    <div class="spread" id="spread">
+      <div class="page left" id="pg-l"></div><div class="page right" id="pg-r"></div>
+      <div id="leaf" class="hidden"><div class="face front"></div><div class="face back"></div></div>
+      <button class="corner cl" id="zoo-cl" aria-label="Turn back a page"></button><button class="corner cr" id="zoo-cr" aria-label="Turn the page"></button>
     </div>
-    <div class="bm-ribbon" aria-hidden="true"></div>
   </div>
   <div id="zoo-nav"><button class="obtn" id="zoo-prev" aria-label="Previous biome"><svg viewBox="0 0 16 16" shape-rendering="crispEdges"><path fill="currentColor" d="M1 8l6-6v4h8v4H7v4z"/></svg></button><button class="obtn menu" id="zoo-menu">MENU</button><button class="obtn" id="zoo-next" aria-label="Next biome"><svg viewBox="0 0 16 16" shape-rendering="crispEdges"><path fill="currentColor" d="M15 8l-6-6v4H1v4h8v4z"/></svg></button></div>
 </div>
@@ -116,12 +112,11 @@
     </div>
   </div>
 <div id="popup" class="hidden" role="dialog" aria-modal="true">
-  <div class="card"><div class="fpage">
-    <div class="pstack" aria-hidden="true"></div>
+  <div class="card"><canvas class="pbg" aria-hidden="true"></canvas><div class="fpage">
     <div id="pop-ribbon" aria-hidden="true"></div>
     <button id="pop-x" aria-label="Close"><svg viewBox="0 0 12 12" shape-rendering="crispEdges"><path fill="currentColor" d="M1 3l2-2 3 3 3-3 2 2-3 3 3 3-2 2-3-3-3 3-2-2 3-3z"/></svg></button>
     <img id="pop-sign" alt="">
-    <canvas id="pop-badge"></canvas>
+    <div class="pframe"><canvas id="pop-badge"></canvas></div>
     <div id="pop-name"></div>
     <div id="pop-tier"></div>
     <div class="orn" aria-hidden="true"></div>
@@ -131,9 +126,9 @@
 <div id="toast" class="hidden"></div>
 <div id="rotate">Turn your phone upright to play</div>
 <script src="matter.min.js"></script>
-<script src="data.js?v=fd2"></script>
-<script src="art.js?v=fd2"></script>
-<script src="game.js?v=fd2"></script>
-<script src="ui.js?v=fd2"></script>
+<script src="data.js?v=fd3"></script>
+<script src="art.js?v=fd3"></script>
+<script src="game.js?v=fd3"></script>
+<script src="ui.js?v=fd3"></script>
 </body>
 </html>

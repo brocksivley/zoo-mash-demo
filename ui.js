@@ -97,7 +97,7 @@
   // =====================================================================================
   // TITLE
   // =====================================================================================
-  const titleIm = img('img/title-bg.jpg?v=fd2');
+  const titleIm = img('img/title-bg.jpg?v=fd3');
   const LAMPS = [[122, 250], [598, 250], [118, 418], [605, 418]];   // top lanterns on both pillars + the two wall lamps
   let titleBg = null, tl = null;
   function buildTitle() {
@@ -268,7 +268,8 @@
       const b = r.i, unlocked = b === 0;
       const isl = document.createElement('div'); isl.className = 'isl' + (unlocked ? '' : ' locked'); isl.dataset.biome = b; isl.setAttribute('role', 'button'); isl.setAttribute('aria-label', D[b].name + (unlocked ? '' : ' (locked)'));
       Object.assign(isl.style, { left: r.island.x + 'px', top: r.island.y + 'px', width: r.island.w + 'px', height: r.island.h + 'px' });
-      if (unlocked) { islCv = document.createElement('canvas'); isl.appendChild(islCv); fitCanvas(islCv, r.island.w, r.island.h); isl.id = 'isl-forest'; }
+      if (unlocked) { const hc = document.createElement('canvas'); hc.className = 'halo'; isl.appendChild(hc); buildHalo(hc, r.island.w, r.island.h);
+        islCv = document.createElement('canvas'); islCv.className = 'art'; isl.appendChild(islCv); fitCanvas(islCv, r.island.w, r.island.h); isl.id = 'isl-forest'; }
       else { const im = document.createElement('img'); im.src = islLocked.src; im.alt = 'Locked'; isl.appendChild(im); }
       const sg = document.createElement('div'); sg.dataset.biome = b;
       Object.assign(sg.style, { left: r.sign.x + 'px', top: r.sign.y + 'px', width: r.sign.w + 'px', height: r.sign.h + 'px' });
@@ -279,6 +280,32 @@
       box.appendChild(isl); box.appendChild(sg);
       if (b === 0 && selected === 0) isl.classList.add('sel');
     });
+  }
+  // Selection halo: a chunky pixel-art gold outline that hugs the island's silhouette (trees + rock), fading outward
+  // through dithered rings. Built once per layout from the island art's alpha; CSS only pulses its opacity (cheap on iOS).
+  function buildHalo(cv, w, h) {
+    if (!ready(islForest) || !ready(islRac)) { islForest.addEventListener('load', () => buildHalo(cv, w, h), { once: true }); islRac.addEventListener('load', () => buildHalo(cv, w, h), { once: true }); return; }
+    const q = Math.max(2, Math.round(2.4 * u)), R = 7, pad = R * q;            // q = CSS px per halo pixel
+    const gw = Math.ceil(w / q) + 2 * R, gh = Math.ceil(h / q) + 2 * R;
+    const sw = islForest.naturalWidth, sh = islForest.naturalHeight;
+    const m = document.createElement('canvas'); m.width = gw; m.height = gh; const mg = m.getContext('2d');
+    mg.imageSmoothingEnabled = true;
+    const ox = R, oy = R, dw = w / q, dh = h / q;
+    for (const dx of [-3.2, 0, 3.2]) mg.drawImage(islForest, 0, 0, sw, FOREST_GROUND, ox + dx * dw / sw, oy, dw, FOREST_GROUND * dh / sh);   // canopy at both sway extremes
+    mg.drawImage(islForest, 0, FOREST_GROUND, sw, sh - FOREST_GROUND, ox, oy + FOREST_GROUND * dh / sh, dw, (sh - FOREST_GROUND) * dh / sh);
+    mg.drawImage(islRac, ox + RAC.x * dw / sw, oy + (RAC.y - 16) * dh / sh, islRac.naturalWidth * dw / sw, islRac.naturalHeight * dh / sh);   // raccoon incl. hop
+    const a = mg.getImageData(0, 0, gw, gh).data, N = gw * gh, dist = new Int16Array(N).fill(-1), Q = [];
+    for (let i = 0; i < N; i++) if (a[i * 4 + 3] > 60) { dist[i] = 0; Q.push(i); }
+    for (let k = 0; k < Q.length; k++) { const i = Q[k], x = i % gw, y = (i / gw) | 0, d = dist[i]; if (d >= R) continue;
+      for (const [ddx, ddy] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, 1], [1, -1], [-1, -1]]) { const nx = x + ddx, ny = y + ddy; if (nx < 0 || ny < 0 || nx >= gw || ny >= gh) continue; const j = ny * gw + nx; if (dist[j] < 0) { dist[j] = d + 1; Q.push(j); } } }
+    const g = cv.getContext('2d'); cv.width = gw; cv.height = gh;
+    Object.assign(cv.style, { left: -pad + 'px', top: -pad + 'px', width: gw * q + 'px', height: gh * q + 'px' });
+    const RING = [null, 'rgba(255,250,200,1)', 'rgba(255,222,90,1)', 'rgba(255,196,50,.92)', 'rgba(255,176,40,.62)', 'rgba(255,170,40,.40)', 'rgba(255,160,40,.24)', 'rgba(255,150,40,.12)'];
+    for (let i = 0; i < N; i++) { const d = dist[i]; if (d < 1) continue; const x = i % gw, y = (i / gw) | 0;
+      if (d >= 5 && (x + y) % 2) continue;                                       // dither the soft outer rings
+      g.fillStyle = RING[d]; g.fillRect(x, y, 1, 1); }
+    // the island body itself gets a warm wash so the gold reads as light, not just a sticker outline
+    for (let i = 0; i < N; i++) if (dist[i] === 0) { const x = i % gw, y = (i / gw) | 0; g.fillStyle = 'rgba(255,214,90,.55)'; g.fillRect(x, y, 1, 1); }
   }
   function tapIsland(b, el) {
     if (b !== 0) { el.classList.remove('shake'); void el.offsetWidth; el.classList.add('shake'); toast('LOCKED'); return; }
@@ -356,59 +383,255 @@
     D.forEach((bm, i) => {
       const t = document.createElement('button'); t.className = 'tab'; t.dataset.b = i; t.setAttribute('role', 'tab'); t.setAttribute('aria-label', bm.name);
       const [col, gl] = TAB[bm.key] || ['#8a5a2a', []]; t.style.setProperty('--tc', col);
-      const cv = document.createElement('canvas'); cv.width = 9; cv.height = 9; const g = cv.getContext('2d');
-      gl.forEach((row, y) => [...row].forEach((ch, x) => { if (ch === 'X') { g.fillStyle = 'rgba(0,0,0,.45)'; g.fillRect(x + 1, y + 2, 1, 1); } }));
-      gl.forEach((row, y) => [...row].forEach((ch, x) => { if (ch === 'X') { g.fillStyle = '#fff6dc'; g.fillRect(x + 1, y + 1, 1, 1); } }));
-      t.appendChild(cv); t.addEventListener('click', () => flipTo(i)); box.appendChild(t);
+      t.addEventListener('click', () => flipTo(i)); box.appendChild(t);
     });
   }
+  // ---------- the physical book: one pixel-art painter for the open Zoopedia spread and the single fun-fact page ----------
+  // Everything static (hardcover with thickness + brass corners, desk shadow, cloth divider tabs, stacked page edges, curved
+  // aged pages with gutter valley, ribbon) is painted once per layout into a small canvas shown at BK.P CSS px per pixel.
+  const BK = { P: 2 };
+  const hsh = (x, y, s) => { let h = Math.imul(x, 374761393) + Math.imul(y, 668265263) + Math.imul(s, 1442695041) | 0; h = Math.imul(h ^ (h >>> 13), 1274126177); return ((h ^ (h >>> 16)) >>> 0) / 4294967296; };
+  function inRR(x, y, x0, y0, x1, y1, r) {             // inside rounded rect [x0,x1) x [y0,y1)
+    if (x < x0 || y < y0 || x >= x1 || y >= y1) return false;
+    const qx = x < x0 + r ? x0 + r : x >= x1 - r ? x1 - r - 1 : x, qy = y < y0 + r ? y0 + r : y >= y1 - r ? y1 - r - 1 : y;
+    const dx = x - qx, dy = y - qy; return dx * dx + dy * dy <= r * r + r * 0.5;
+  }
+  const hexRGB = h => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
+  function paintBook(cv, Wc, Hc, o) {
+    const P = BK.P, cw0 = Math.max(40, Math.floor(Wc / P)), cw = o.single ? cw0 : cw0 - (1 - cw0 % 2), ch = Math.max(40, Math.floor(Hc / P));
+    cv.width = cw; cv.height = ch; cv.style.width = cw * P + 'px'; cv.style.height = ch * P + 'px';
+    const g = cv.getContext('2d'), im = g.createImageData(cw, ch), d = im.data;
+    const single = !!o.single, tabH = o.tabs ? 15 : 0, rb = o.ribbon ? 10 : 0, SHX = 2, SHY = 3;
+    const X0 = 0, Y0 = tabH, X1 = cw - SHX - 1, Y1 = ch - Math.max(SHY + 2, rb), RAD = 4, TH = 3, K = 5;
+    const bx0 = X0 + (single ? 10 : 6), bx1 = X1 - 6, by0 = Y0 + 5, by1 = Y1 - TH - 4;
+    const cx = single ? bx0 : Math.round((bx0 + bx1) / 2);
+    const Lx0 = bx0 + K, Rx1 = bx1 - K, T = by0 + 1, B = by1 - K, G0 = single ? .88 : .68;
+    const put = (x, y, r, gg, b, a) => {
+      if (x < 0 || y < 0 || x >= cw || y >= ch) return; const i = (y * cw + x) * 4;
+      if (a === undefined || a >= 255) { d[i] = r; d[i + 1] = gg; d[i + 2] = b; d[i + 3] = 255; return; }
+      const na = a / 255, ea = d[i + 3] / 255, oa = na + ea * (1 - na); if (!oa) return;
+      d[i] = (r * na + d[i] * ea * (1 - na)) / oa; d[i + 1] = (gg * na + d[i + 1] * ea * (1 - na)) / oa; d[i + 2] = (b * na + d[i + 2] * ea * (1 - na)) / oa; d[i + 3] = oa * 255;
+    };
+    const shade = (x, y, k) => { const i = (y * cw + x) * 4; d[i] *= k; d[i + 1] *= k; d[i + 2] *= k; };
+    // --- 1. desk shadow + hardcover (leather, bevel, tooled gold line, thickness band, brass corners)
+    const inCov = (x, y) => inRR(x, y, X0, Y0, X1, Y1, RAD);
+    for (let y = 0; y < ch; y++) for (let x = 0; x < cw; x++) {
+      if (!inCov(x, y)) {
+        if (inRR(x - SHX, y - SHY, X0, Y0, X1, Y1, RAD)) put(x, y, 20, 9, 3, 150);
+        else if (inRR(x - SHX - 1, y - SHY - 2, X0, Y0, X1, Y1, RAD + 1) && (x + y) % 2 === 0) put(x, y, 20, 9, 3, 80);
+        continue;
+      }
+      const edge = !inCov(x - 1, y) || !inCov(x + 1, y) || !inCov(x, y - 1) || !inCov(x, y + 1);
+      const ctl = (x - X0) + (y - Y0), ctr = (X1 - 1 - x) + (y - Y0), cbl = (x - X0) + (Y1 - 1 - y), cbr = (X1 - 1 - x) + (Y1 - 1 - y);
+      const cn = Math.min(ctl, ctr, cbl, cbr);
+      if (edge) { put(x, y, 30, 11, 4); continue; }
+      if (cn <= 9) {                                    // brass corner protectors
+        if (cn >= 9) put(x, y, 86, 52, 10);
+        else if (cn >= 7) put(x, y, 168, 122, 34);
+        else { const hi = cn <= 2 ? 1.12 : 1, n = 1 + (hsh(x, y, 9) - .5) * .1; put(x, y, Math.min(255, 226 * hi * n), Math.min(255, 182 * hi * n), 86 * hi * n); }
+        continue;
+      }
+      if (y >= Y1 - TH) {                               // board thickness: the cover's edge seen from above
+        if (y === Y1 - TH) put(x, y, 40, 15, 6); else { const n = 1 + (hsh(x, y, 4) - .5) * .12; put(x, y, 84 * n, 36 * n, 16 * n); }
+        continue;
+      }
+      const n = 1 + (hsh(x, y, 3) - .5) * .16 + Math.sin(x * .23 + Math.sin(y * .11) * 2.2) * .04 + Math.sin(y * .17 + x * .05) * .03;
+      let r = 112 * n, gg = 47 * n, b = 23 * n;
+      if (!inCov(x, y - 2)) { r += 30; gg += 14; b += 8; } else if (!inCov(x - 2, y)) { r += 16; gg += 7; b += 4; }
+      else if (!inCov(x + 2, y)) { r *= .8; gg *= .8; b *= .8; } else if (y === Y1 - TH - 1) { r *= .72; gg *= .72; b *= .72; }
+      const tooled = inRR(x, y, X0 + 2, Y0 + 2, X1 - 2, Y1 - TH - 2, RAD - 1) && !inRR(x, y, X0 + 3, Y0 + 3, X1 - 3, Y1 - TH - 3, RAD - 2);
+      if (tooled && ((x + y) >> 1) % 2 === 0) { r = 196; gg = 142; b = 82; }
+      put(x, y, r, gg, b);
+    }
+    // --- 2. cloth divider tabs (between cover and pages, so the pages cover their roots); the open one is drawn on an overlay
+    const tabRects = [], tabX = [];
+    const paintTab = (pt, i, on, lim) => {
+      const tb = o.tabs[i], [tx0, tx1] = tabX[i], ty0 = on ? 0 : 3, ty1 = by0 + 6;
+      const [cr, cg, cb] = hexRGB(tb.col), dim = on ? 1.04 : .8, tw = tx1 - tx0;
+      for (let y = ty0; y < ty1; y++) for (let x = tx0; x < tx1; x++) {
+        if (lim && y >= lim[x]) continue;
+        if (!inRR(x, y, tx0, ty0, tx1, ty1 + 4, 2)) continue;
+        const ed = !inRR(x - 1, y, tx0, ty0, tx1, ty1 + 4, 2) || !inRR(x + 1, y, tx0, ty0, tx1, ty1 + 4, 2) || !inRR(x, y - 1, tx0, ty0, tx1, ty1 + 4, 2);
+        if (ed) { pt(x, y, 36, 20, 10); continue; }
+        let k = dim * (y % 2 ? .93 : 1) * ((x + (y >> 1)) % 3 === 0 ? .96 : 1);
+        if (y <= ty0 + 1) k *= 1.22; else if (x === tx0 + 1) k *= 1.12; else if (x === tx1 - 2) k *= .8;
+        if (y >= Y0 + 2) k *= .86;
+        pt(x, y, Math.min(255, cr * k), Math.min(255, cg * k), Math.min(255, cb * k));
+      }
+      for (let y = Math.max(ty0 + 2, Y0); y < ty1; y++) if (!lim || y < lim[tx1]) pt(tx1, y, 10, 4, 1, 90);
+      if (on) for (let x = tx0 + 2; x < tx1 - 2; x += 2) pt(x, ty0 + 3, 255, 240, 200, 130);
+      const gl = tb.glyph || [], gx = tx0 + Math.floor((tw - 7) / 2), gy = ty0 + 5;
+      gl.forEach((row, yy) => [...row].forEach((c, xx) => { if (c === 'X') pt(gx + xx + 1, gy + yy + 1, 0, 0, 0, 110); }));
+      gl.forEach((row, yy) => [...row].forEach((c, xx) => { if (c === 'X') pt(gx + xx, gy + yy, 255, 246, 220); }));
+    };
+    if (o.tabs) {
+      const n = o.tabs.length, gap = 1, x0 = X0 + 9, span = X1 - 9 - x0, tw = Math.floor((span - gap * (n - 1)) / n);
+      const off = Math.floor((span - (tw * n + gap * (n - 1))) / 2);
+      for (let i = 0; i < n; i++) { const tx0 = x0 + off + i * (tw + gap); tabX.push([tx0, tx0 + tw]); tabRects.push({ x: tx0 * P, y: 0, w: tw * P, h: (by0 + 2) * P }); paintTab(put, i, false); }
+    }
+    // --- 3. pages: K stacked sheets offset outward + down under the top sheet; the top sheet is curved and shaded
+    const topOff = s => s < .7 ? 2 * (1 - s / .7) ** 2 : 5 * ((s - .7) / .3) ** 2;      // s: 0 outer edge .. 1 spine
+    const botOff = s => s < .62 ? 0 : 4 * ((s - .62) / .38) ** 2;
+    const sOf = (L, x, oo) => L ? (x - (Lx0 - oo)) / Math.max(1, cx - 1 - (Lx0 - oo)) : ((Rx1 - 1 + oo) - x) / Math.max(1, (Rx1 - 1 + oo) - cx);
+    const layer = (x, y) => {
+      if (x < cx && single) return -1; const L = x < cx;
+      for (let oo = 0; oo <= K + 1; oo++) {
+        if (L ? x < Lx0 - oo : x > Rx1 - 1 + oo) continue;
+        const s = Math.min(1, Math.max(0, sOf(L, x, oo)));
+        if (y >= T + oo + Math.round(topOff(s)) && y < B + oo - Math.round(botOff(s))) return oo;
+      }
+      return -1;
+    };
+    const R0 = rng(o.seed || 5), fox = [];
+    for (let i = 0; i < 16; i++) fox.push([bx0 + R0() * (bx1 - bx0), by0 + R0() * (by1 - by0), .7 + R0() * 1.5, R0()]);
+    const lay = new Int8Array(cw * ch).fill(-1);
+    for (let y = by0 - 1; y < Y1; y++) for (let x = bx0 - 1; x <= bx1 + 1; x++) lay[y * cw + x] = layer(x, y);
+    const LA = (x, y) => (x < 0 || y < 0 || x >= cw || y >= ch) ? -1 : lay[y * cw + x];
+    for (let y = by0 - 1; y < Y1; y++) for (let x = bx0 - 1; x <= bx1 + 1; x++) {
+      const l = LA(x, y);
+      if (l < 0) { if (LA(x, y + 1) === 0) put(x, y, 60, 36, 14); continue; }   // dark line above the top edge
+      if (l > 0) {
+        if (l === K + 1) put(x, y, 58, 34, 14);
+        else if (l % 2) { const k = 1 - l * .025; put(x, y, 238 * k, 222 * k, 182 * k); }
+        else put(x, y, 168, 134, 90);
+        continue;
+      }
+      const L = x < cx, s = Math.min(1, Math.max(0, sOf(L, x, 0)));
+      const dt = y - (T + Math.round(topOff(s))), db = (B - Math.round(botOff(s))) - 1 - y, dout = L ? x - Lx0 : Rx1 - 1 - x;
+      const e = Math.min(dt, db, dout);
+      let k = 1 + (hsh(x, y, 1) - .5) * .045, add = 0;
+      if (hsh(x, y, 2) < .012) k *= .93;
+      if (s > G0) { const q = Math.round(((s - G0) / (1 - G0)) ** 2 * 7) / 7; k *= 1 - .52 * q; }
+      else if (s > G0 - .28) add = 7;
+      if (s < .035) k *= .94;
+      const vg = e < 1 ? .83 : e < 2 ? .9 : e < 4 ? .945 : e < 8 ? .972 : 1;
+      let r = (241 + add) * k * vg, gg = (224 + add) * k * vg, b = (182 + add) * k * vg * (vg < 1 ? vg : 1);
+      for (const [fx, fy, fr, fa] of fox) { const dd = (x - fx) ** 2 + (y - fy) ** 2; if (dd < fr * fr && (fa > .5 || (x + y) % 2)) { r = r * .9 + 196 * .1 - 4; gg = gg * .88 + 160 * .12 - 6; b = b * .8 + 104 * .2 - 8; } }
+      if ((L && x === cx - 1) || (!L && x === cx)) { r = 78; gg = 48; b = 22; }
+      else if ((L && x === cx - 2) || (!L && x === cx + 1)) { r *= .66; gg *= .64; b *= .6; }
+      put(x, y, r, gg, b);
+    }
+    // --- 4. ribbon bookmark: lies in the gutter, slips out over the bottom page edges and the cover onto the desk
+    if (o.ribbon) {
+      const ys = B - 18, ye = ch - 2;
+      for (let y = ys; y <= ye; y++) {
+        const bend = y > Y1 - 3 ? Math.min(3, Math.floor((y - (Y1 - 3)) / 2)) : 0, rx = cx + 2 + bend, end = ye - y;
+        for (let i = -1; i <= 4; i++) {
+          const x = rx + i;
+          if (end < 3 && i >= 1 && i <= 2 && end < 3 - Math.abs(i - 1.5) * 2 + 1.5) continue;   // V-cut tail
+          if (i === -1 || i === 4) { put(x, y, 60, 10, 12); continue; }
+          const c = i === 0 ? [218, 76, 62] : i === 3 ? [122, 22, 26] : [178, 38, 42], k = y % 3 === 0 ? .92 : 1;
+          put(x, y, c[0] * k, c[1] * k, c[2] * k);
+        }
+        if (y > Y1 - TH - 2) put(rx + 5, y + 1, 10, 4, 1, 100);
+      }
+    }
+    g.putImageData(im, 0, 0);
+    // page bitmaps (just the top sheet) for the turning leaf's faces
+    const crop = (x0, x1) => {
+      const c = document.createElement('canvas'); c.width = x1 - x0; c.height = B - T; const cg = c.getContext('2d'), ci = cg.createImageData(c.width, c.height);
+      for (let y = T; y < B; y++) for (let x = x0; x < x1; x++) if (lay[y * cw + x] === 0) { const i = (y * cw + x) * 4, j = ((y - T) * c.width + x - x0) * 4; ci.data[j] = d[i]; ci.data[j + 1] = d[i + 1]; ci.data[j + 2] = d[i + 2]; ci.data[j + 3] = 255; }
+      cg.putImageData(ci, 0, 0); return 'url(' + c.toDataURL() + ')';
+    };
+    // overlay painter for the open tab: taller + brighter, clipped just above the page edge in every column
+    const lim = new Int16Array(cw).fill(ch);
+    for (let x = 0; x < cw; x++) for (let y = 0; y < Y1; y++) if (lay[y * cw + x] >= 0 || lay[(y + 1) * cw + x] === 0) { lim[x] = y; break; }
+    const drawActive = (cv2, i) => {
+      cv2.width = cw; cv2.height = ch; cv2.style.width = cw * P + 'px'; cv2.style.height = ch * P + 'px';
+      if (!o.tabs || i < 0) return; const g2 = cv2.getContext('2d'), i2 = g2.createImageData(cw, by0 + 8), d2 = i2.data;
+      const pt = (x, y, r, gg, b, a) => { if (x < 0 || y < 0 || x >= cw || y >= by0 + 8) return; const j = (y * cw + x) * 4; const na = (a === undefined ? 255 : a) / 255, ea = d2[j + 3] / 255, oa = na + ea * (1 - na); if (!oa) return;
+        d2[j] = (r * na + d2[j] * ea * (1 - na)) / oa; d2[j + 1] = (gg * na + d2[j + 1] * ea * (1 - na)) / oa; d2[j + 2] = (b * na + d2[j + 2] * ea * (1 - na)) / oa; d2[j + 3] = oa * 255; };
+      paintTab(pt, i, true, lim); g2.putImageData(i2, 0, 0);
+    };
+    const box = (x0, x1) => ({ x: x0 * P, y: T * P, w: (x1 - x0) * P, h: (B - T) * P });
+    return { P, drawActive, L: single ? null : box(Lx0, cx), R: box(cx, Rx1), tabs: tabRects, urlL: o.crops && !single ? crop(Lx0, cx) : '', urlR: o.crops ? crop(cx, Rx1) : '',
+      pad: { l: cx * P, r: (cw - Rx1) * P, t: T * P, b: (ch - B) * P } };
+  }
+  // field-guide illustrations: the bare sprite (no badge circle), crisp at the device ratio; locked = faint pencil silhouette
+  const plates = new Map();
+  async function drawPlate(cv, b, t, css, locked) {
+    const n = Math.max(8, Math.round(css * dpr)), tag = b + ':' + t + ':' + n + (locked ? 'L' : '');
+    cv.dataset.tag = tag; cv.style.width = cv.style.height = css + 'px';
+    let src = plates.get(tag);
+    if (!src) {
+      let im; try { im = await Art.load(b, t); } catch (e) { return; }
+      src = document.createElement('canvas'); src.width = src.height = n; const g = src.getContext('2d');
+      const k = Math.max(1, Math.ceil(n / im.naturalWidth)), up = document.createElement('canvas'); up.width = im.naturalWidth * k; up.height = im.naturalHeight * k;
+      const ug = up.getContext('2d'); ug.imageSmoothingEnabled = false; ug.drawImage(im, 0, 0, up.width, up.height);
+      g.imageSmoothingEnabled = true; g.imageSmoothingQuality = 'high'; g.drawImage(up, 0, 0, n, n);
+      if (locked) {
+        g.globalCompositeOperation = 'source-in'; g.fillStyle = 'rgba(92,80,64,.22)'; g.fillRect(0, 0, n, n);
+        g.globalCompositeOperation = 'source-atop'; g.strokeStyle = 'rgba(92,80,64,.32)'; g.lineWidth = Math.max(1, n / 90);
+        g.beginPath(); for (let x = -n; x < n; x += n / 14) { g.moveTo(x, n); g.lineTo(x + n, 0); } g.stroke();
+      }
+      plates.set(tag, src); if (plates.size > 72) plates.delete(plates.keys().next().value);
+    }
+    if (cv.dataset.tag !== tag) return;
+    cv.width = cv.height = n; const g = cv.getContext('2d'); g.clearRect(0, 0, n, n); g.drawImage(src, 0, 0);
+  }
+  let zGeo = null;
   function zooLayout() {
     drawWood($('zoo-cv')); buildTabs();
-    const navH = 70 * u, navBot = 22 * u + sb, cntTop = 72 * u + st, cntH = 40 * u, tabsH = 28 * u;
-    const nav = $('zoo-nav'); nav.style.bottom = navBot + 'px';
-    const book = $('book');
-    const pageW = (W - 24 * u - 30 * u - 20 * u) / 2 - 14 * u;     // inner width of one page (cover, stacks, page padding)
-    const cd = Math.min(84 * u, pageW / 2 - 6 * u);
-    const rowH = cd + 34 * u;                                      // circle + two-line name
-    const want = 3 * rowH + 2 * 6 * u + 38 * u + 52 * u;           // rows + gaps + page padding + cover/stacks
-    const regTop = cntTop + cntH + 12 * u + tabsH, regBot = H - (navBot + navH + 34 * u);
-    const bh = Math.min(regBot - regTop, want * 1.3), cd2 = bh < want ? Math.max(40 * u, cd - (want - bh) / 3) : cd;
+    BK.P = Math.max(2, Math.round(2.2 * u));
+    const navH = 70 * u, navBot = 22 * u + sb, cntTop = 72 * u + st, cntH = 40 * u;
+    $('zoo-nav').style.bottom = navBot + 'px'; $('zoo-count').style.top = cntTop + 'px';
+    const book = $('book'), regTop = cntTop + cntH + 4 * u, regBot = H - (navBot + navH + 6 * u);
+    const bw = W - 16 * u, bh = Math.min(regBot - regTop, bw * 1.5);
     const bt = regTop + Math.max(0, (regBot - regTop - bh) / 2);
-    book.style.top = bt + 'px'; book.style.height = bh + 'px'; book.style.bottom = 'auto';
-    $('zoo-count').style.top = (bt - tabsH - cntH - 12 * u) + 'px';
-    book.style.setProperty('--cd', cd2 + 'px');
+    Object.assign(book.style, { left: 8 * u + 'px', right: 'auto', width: bw + 'px', top: bt + 'px', height: bh + 'px', bottom: 'auto' });
+    const tabs = D.map((bm, i) => ({ col: tabCol(i), glyph: (TAB[bm.key] || [0, []])[1] }));
+    zGeo = paintBook($('book-cv'), bw, bh, { tabs, ribbon: true, crops: true, seed: 5 });
+    book.style.left = Math.round((W - parseFloat($('book-cv').style.width)) / 2) + 'px';
+    book.style.setProperty('--pgL', zGeo.urlL); book.style.setProperty('--pgR', zGeo.urlR);
+    const place = (el, r) => Object.assign(el.style, { left: r.x + 'px', top: r.y + 'px', width: r.w + 'px', height: r.h + 'px' });
+    place($('pg-l'), zGeo.L); place($('pg-r'), zGeo.R);
+    document.querySelectorAll('#tabs .tab').forEach((t, i) => place(t, zGeo.tabs[i]));
+    const cs = 46 * u, cl = $('zoo-cl'), cr = $('zoo-cr');
+    place(cl, { x: zGeo.L.x, y: zGeo.L.y + zGeo.L.h - cs, w: cs, h: cs }); place(cr, { x: zGeo.R.x + zGeo.R.w - cs, y: zGeo.R.y + zGeo.R.h - cs, w: cs, h: cs });
+    // entry frame size: two columns per page, three rows under the heading
+    const pw = zGeo.L.w - 28 * u, ph = zGeo.L.h - 40 * u - 34 * u;
+    const cd = Math.max(40 * u, Math.min((pw - 10 * u) / 2, ph / 3 - 46 * u));
+    book.style.setProperty('--cd', cd + 'px');
     zooBuilt = true;
   }
   function spot(b, t) {
     const d = document.createElement('div'); d.className = 'spot';
     const c = document.createElement('div'); c.className = 'circ'; d.appendChild(c);
-    const n = document.createElement('div'); n.className = 'nm'; d.appendChild(n);
-    const a = D[b].animals[t - 1];
+    const cap = document.createElement('div'); cap.className = 'cap'; d.appendChild(cap);
+    const no = document.createElement('div'); no.className = 'no'; no.textContent = 'No.' + String(t).padStart(2, '0'); cap.appendChild(no);
+    const n = document.createElement('div'); n.className = 'nm'; cap.appendChild(n);
+    const a = D[b].animals[t - 1], cd = parseFloat(getComputedStyle($('book')).getPropertyValue('--cd')) || 84;
+    const cv = document.createElement('canvas'); c.appendChild(cv);
     if (isFound(b, t)) {
       d.classList.add('found'); d.dataset.tier = t; n.textContent = a.n.toUpperCase();
-      const cv = document.createElement('canvas'); c.appendChild(cv);
-      const cd = parseFloat(getComputedStyle($('book')).getPropertyValue('--cd')) || 84;
-      Art.draw(cv, b, t, cd);
+      drawPlate(cv, b, t, cd * .86, false);
       d.addEventListener('click', () => { if (!flipping && !swiped) openPopup(b, t); });
       d.setAttribute('role', 'button'); d.setAttribute('aria-label', a.n);
-    } else { d.classList.add('unfound'); c.innerHTML = '<div class="lockc">?</div>'; n.textContent = 'LOCKED'; n.classList.add('lk'); }
-    const lw = Math.max(...n.textContent.split(' ').map(x => x.length)); if (lw > 7) { n.style.fontSize = (1.25 * 7 / lw) + 'rem'; n.style.letterSpacing = '0'; }
+    } else {
+      d.classList.add('unfound'); drawPlate(cv, b, t, cd * .8, true);
+      const q = document.createElement('div'); q.className = 'lockc'; q.textContent = '?'; c.appendChild(q);
+      n.textContent = '???'; n.classList.add('lk'); d.setAttribute('aria-label', 'Not found yet');
+    }
+    const lw = Math.max(...n.textContent.split(' ').map(x => x.length)), fz = Math.min(13 * u, cd / (lw * 1.12)); if (fz < 13 * u) { n.style.fontSize = fz + 'px'; n.style.letterSpacing = '0'; }
     return d;
   }
-  // fill one page of biome b: left = sign + tiers 1-5, right = tiers 6-11, page number at the foot
+  // fill one page of biome b: heading, then left = pasted-in biome sign + tiers 1-5, right = tiers 6-11; page number at the foot
   function fillPage(el, b, side) {
     el.innerHTML = '';
+    const hd = document.createElement('div'); hd.className = 'pghead'; hd.innerHTML = '<span></span>';
+    hd.firstChild.textContent = side === 'l' ? D[b].name.toUpperCase() : 'FIELD NOTES'; el.appendChild(hd);
     if (side === 'l') {
       const sd = document.createElement('div'); sd.className = 'spot signspot'; const si = document.createElement('img'); si.src = SIGN[b]; si.alt = D[b].name; sd.appendChild(si); el.appendChild(sd);
       for (let t = 1; t <= 5; t++) el.appendChild(spot(b, t));
     } else for (let t = 6; t <= 11; t++) el.appendChild(spot(b, t));
-    const pn = document.createElement('div'); pn.className = 'pgno'; pn.textContent = b * 2 + (side === 'l' ? 1 : 2); el.appendChild(pn);
+    const pn = document.createElement('div'); pn.className = 'pgno'; pn.textContent = '- ' + (b * 2 + (side === 'l' ? 1 : 2)) + ' -'; el.appendChild(pn);
   }
   function syncNav() {
     $('zoo-n').textContent = foundCount();
     $('zoo-prev').disabled = $('zoo-cl').disabled = zb === 0; $('zoo-next').disabled = $('zoo-cr').disabled = zb === D.length - 1;
     $('book').dataset.biome = D[zb].key;
     document.querySelectorAll('#tabs .tab').forEach((t, i) => { t.classList.toggle('on', i === zb); t.setAttribute('aria-selected', i === zb); });
+    if (zGeo) zGeo.drawActive($('book-tab'), zb);
   }
   function renderBook() {
     fillPage($('pg-l'), zb, 'l'); fillPage($('pg-r'), zb, 'r'); syncNav();
@@ -492,13 +715,15 @@
     if (!popOpen) { el.classList.remove('hidden'); el.classList.add('fade'); void el.offsetWidth; requestAnimationFrame(() => el.classList.remove('fade')); popOpen = true; }
     fitFact(b, t);
   }
-  function fitFact(b, t) { // big badge + large text; shrink the badge first, then the text, if a long fact would overflow
-    const f = $('pop-fact'), card = document.querySelector('#popup .card'), max = $('popup').clientHeight - 28 * u;
-    let bs = 190, fs = 1.6;
-    const apply = () => { Art.draw($('pop-badge'), b, t, bs * u); f.style.fontSize = fs + 'rem'; };
+  function fitFact(b, t) { // big illustration + large text; shrink the picture first, then the text, if a long fact would overflow
+    const f = $('pop-fact'), card = document.querySelector('#popup .card'), max = $('popup').clientHeight - 28 * u, P = BK.P = Math.max(2, Math.round(2.2 * u));
+    card.style.padding = (6 * P) + 'px ' + (14 * P) + 'px ' + (17 * P) + 'px ' + (10 * P) + 'px';
+    let bs = 170, fs = 1.6;
+    const apply = () => { drawPlate($('pop-badge'), b, t, bs * u, false); f.style.fontSize = fs + 'rem'; };
     apply();
-    while (card.offsetHeight > max && bs > 120) { bs -= 10; apply(); }
+    while (card.offsetHeight > max && bs > 110) { bs -= 10; apply(); }
     while (card.offsetHeight > max && fs > 1.25) { fs -= 0.05; apply(); }
+    paintBook(card.querySelector('.pbg'), card.offsetWidth, card.offsetHeight, { single: true, seed: 9 + t });
   }
   function closePopup(instant) {
     const el = $('popup'); if (!popOpen) return; popOpen = false;
