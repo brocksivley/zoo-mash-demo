@@ -65,6 +65,8 @@
     const cssN = n / dpr; cv.style.width = cv.style.height = cssN + 'px';
     cv.style.margin = (-(cssN - css) / 2) + 'px';
   }
+  // drop the big 4x temp canvases for a biome (or one tier) once its badges are rendered (phone memory)
+  function forget(b, t) { for (let i = t || 1; i <= (t || 11); i++) delete mips[key(b, i)]; }
   function preload(b) { for (let t = 1; t <= 11; t++) load(b, t).catch(() => {}); }
-  window.ZMArt = { draw, preload, load, paint, data: D };
+  window.ZMArt = { draw, preload, load, paint, forget, data: D };
 })();
