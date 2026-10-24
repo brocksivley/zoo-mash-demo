@@ -97,7 +97,7 @@
   // =====================================================================================
   // TITLE
   // =====================================================================================
-  const titleIm = img('img/title-bg.jpg?v=fd3');
+  const titleIm = img('img/title-bg.jpg?v=fd4');
   const LAMPS = [[122, 250], [598, 250], [118, 418], [605, 418]];   // top lanterns on both pillars + the two wall lamps
   let titleBg = null, tl = null;
   function buildTitle() {
@@ -547,10 +547,10 @@
     return { P, drawActive, L: single ? null : box(Lx0, cx), R: box(cx, Rx1), tabs: tabRects, urlL: o.crops && !single ? crop(Lx0, cx) : '', urlR: o.crops ? crop(cx, Rx1) : '',
       pad: { l: cx * P, r: (cw - Rx1) * P, t: T * P, b: (ch - B) * P } };
   }
-  // field-guide illustrations: the bare sprite (no badge circle), crisp at the device ratio; locked = faint pencil silhouette
+  // field-guide illustrations: the bare sprite (no badge circle), crisp at the device ratio (only ever drawn for found animals)
   const plates = new Map();
-  async function drawPlate(cv, b, t, css, locked) {
-    const n = Math.max(8, Math.round(css * dpr)), tag = b + ':' + t + ':' + n + (locked ? 'L' : '');
+  async function drawPlate(cv, b, t, css) {
+    const n = Math.max(8, Math.round(css * dpr)), tag = b + ':' + t + ':' + n;
     cv.dataset.tag = tag; cv.style.width = cv.style.height = css + 'px';
     let src = plates.get(tag);
     if (!src) {
@@ -559,11 +559,6 @@
       const k = Math.max(1, Math.ceil(n / im.naturalWidth)), up = document.createElement('canvas'); up.width = im.naturalWidth * k; up.height = im.naturalHeight * k;
       const ug = up.getContext('2d'); ug.imageSmoothingEnabled = false; ug.drawImage(im, 0, 0, up.width, up.height);
       g.imageSmoothingEnabled = true; g.imageSmoothingQuality = 'high'; g.drawImage(up, 0, 0, n, n);
-      if (locked) {
-        g.globalCompositeOperation = 'source-in'; g.fillStyle = 'rgba(92,80,64,.22)'; g.fillRect(0, 0, n, n);
-        g.globalCompositeOperation = 'source-atop'; g.strokeStyle = 'rgba(92,80,64,.32)'; g.lineWidth = Math.max(1, n / 90);
-        g.beginPath(); for (let x = -n; x < n; x += n / 14) { g.moveTo(x, n); g.lineTo(x + n, 0); } g.stroke();
-      }
       plates.set(tag, src); if (plates.size > 72) plates.delete(plates.keys().next().value);
     }
     if (cv.dataset.tag !== tag) return;
@@ -598,17 +593,17 @@
     const d = document.createElement('div'); d.className = 'spot';
     const c = document.createElement('div'); c.className = 'circ'; d.appendChild(c);
     const cap = document.createElement('div'); cap.className = 'cap'; d.appendChild(cap);
-    const no = document.createElement('div'); no.className = 'no'; no.textContent = 'No.' + String(t).padStart(2, '0'); cap.appendChild(no);
+    const no = document.createElement('div'); no.className = 'no'; no.textContent = 'No.' + String(b * 11 + t).padStart(2, '0'); cap.appendChild(no);
     const n = document.createElement('div'); n.className = 'nm'; cap.appendChild(n);
     const a = D[b].animals[t - 1], cd = parseFloat(getComputedStyle($('book')).getPropertyValue('--cd')) || 84;
-    const cv = document.createElement('canvas'); c.appendChild(cv);
     if (isFound(b, t)) {
+      const cv = document.createElement('canvas'); c.appendChild(cv);
       d.classList.add('found'); d.dataset.tier = t; n.textContent = a.n.toUpperCase();
-      drawPlate(cv, b, t, cd * .86, false);
+      drawPlate(cv, b, t, cd * .86);
       d.addEventListener('click', () => { if (!flipping && !swiped) openPopup(b, t); });
       d.setAttribute('role', 'button'); d.setAttribute('aria-label', a.n);
     } else {
-      d.classList.add('unfound'); drawPlate(cv, b, t, cd * .8, true);
+      d.classList.add('unfound');            // locked: a plain solid block with a '?', never the animal's shape
       const q = document.createElement('div'); q.className = 'lockc'; q.textContent = '?'; c.appendChild(q);
       n.textContent = '???'; n.classList.add('lk'); d.setAttribute('aria-label', 'Not found yet');
     }
@@ -719,7 +714,7 @@
     const f = $('pop-fact'), card = document.querySelector('#popup .card'), max = $('popup').clientHeight - 28 * u, P = BK.P = Math.max(2, Math.round(2.2 * u));
     card.style.padding = (6 * P) + 'px ' + (14 * P) + 'px ' + (17 * P) + 'px ' + (10 * P) + 'px';
     let bs = 170, fs = 1.6;
-    const apply = () => { drawPlate($('pop-badge'), b, t, bs * u, false); f.style.fontSize = fs + 'rem'; };
+    const apply = () => { drawPlate($('pop-badge'), b, t, bs * u); f.style.fontSize = fs + 'rem'; };
     apply();
     while (card.offsetHeight > max && bs > 110) { bs -= 10; apply(); }
     while (card.offsetHeight > max && fs > 1.25) { fs -= 0.05; apply(); }
