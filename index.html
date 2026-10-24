@@ -21,14 +21,39 @@
   <div id="topbar">
     <div class="stat">SCORE <span id="score">0</span></div>
     <div class="stat">BEST <span id="best">0</span></div>
-    <button id="gear" aria-label="Settings">
+    <button id="pause" class="iconbtn" aria-label="Pause">
+      <svg viewBox="0 0 24 24" shape-rendering="crispEdges"><g fill="currentColor"><rect x="5" y="4" width="5" height="16"/><rect x="14" y="4" width="5" height="16"/></g></svg>
+    </button>
+    <button id="gear" class="iconbtn" aria-label="Settings">
       <svg viewBox="0 0 24 24"><g fill="currentColor"><rect x="10" y="1" width="4" height="6" transform="rotate(0 12 12)"/><rect x="10" y="1" width="4" height="6" transform="rotate(45 12 12)"/><rect x="10" y="1" width="4" height="6" transform="rotate(90 12 12)"/><rect x="10" y="1" width="4" height="6" transform="rotate(135 12 12)"/><rect x="10" y="1" width="4" height="6" transform="rotate(180 12 12)"/><rect x="10" y="1" width="4" height="6" transform="rotate(225 12 12)"/><rect x="10" y="1" width="4" height="6" transform="rotate(270 12 12)"/><rect x="10" y="1" width="4" height="6" transform="rotate(315 12 12)"/><circle cx="12" cy="12" r="7.5"/></g><circle cx="12" cy="12" r="3.2" fill="#121610"/></svg>
     </button>
   </div>
-  <div id="menu" class="hidden">
-    <button id="m-restart">RESTART</button>
-    <button id="m-close">CLOSE</button>
+  <div id="pausemenu" class="modal hidden">
+    <div class="panel">
+      <div class="title">PAUSED</div>
+      <button id="p-resume">RESUME</button>
+      <button id="p-restart" class="wood">RESTART</button>
+      <button id="p-main" class="wood">MAIN MENU</button>
+      <button id="p-zoo" class="wood">ZOOPEDIA</button>
+    </div>
   </div>
+  <div id="settings" class="modal hidden">
+    <div class="panel">
+      <div class="title">SETTINGS</div>
+      <div class="tog"><span>VIBRATION</span><button class="sw" id="s-vibration" role="switch"></button></div>
+      <div class="tog"><span>SOUND</span><button class="sw" id="s-sound" role="switch"></button></div>
+      <div class="tog"><span>MUSIC</span><button class="sw" id="s-music" role="switch"></button></div>
+      <div id="tune">
+        <div class="demo">TUNE PHYSICS<small>DEMO ONLY · FOR TESTING</small></div>
+        <label class="tr"><span class="tl">GRAVITY <b id="v-gravity"></b></span><input type="range" id="t-gravity"><span class="th"><i>floaty</i><i>heavy</i></span></label>
+        <label class="tr"><span class="tl">BOUNCE <b id="v-bounce"></b></span><input type="range" id="t-bounce"><span class="th"><i>dead</i><i>springy</i></span></label>
+        <label class="tr"><span class="tl">WEIGHT <b id="v-weight"></b></span><input type="range" id="t-weight"><span class="th"><i>all equal</i><i>big = heavy</i></span></label>
+        <button id="t-reset" class="wood small">RESET DEFAULTS</button>
+      </div>
+      <button id="s-close">DONE</button>
+    </div>
+  </div>
+  <div id="toast" class="hidden"></div>
   <div id="next"><div class="lbl">NEXT</div><img id="next-img" alt=""></div>
   <div id="strip"><div id="slots"></div></div>
   <div id="over" class="hidden">
