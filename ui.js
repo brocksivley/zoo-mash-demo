@@ -66,10 +66,10 @@
   // ---------- one animation loop for the decorative screens ----------
   let t0 = performance.now();
   function loop(t) {
-    const s = (t - t0) / 1000;
+    requestAnimationFrame(loop);                       // schedule first so one bad frame can never stop the loop
+    const s = Math.max(0, (t - t0) / 1000);            // the first rAF stamp can precede t0 (negative time broke the bird frame)
     if (cur === 'title') drawTitle(s);
     else if (cur === 'map') drawForestIsland(s);
-    requestAnimationFrame(loop);
   }
 
   // ---------- helpers ----------
@@ -97,8 +97,8 @@
   // =====================================================================================
   // TITLE
   // =====================================================================================
-  const titleIm = img('img/title-bg.jpg');
-  const LAMPS = [[598, 244], [102, 416], [605, 416]];
+  const titleIm = img('img/title-bg.jpg?v=fd2');
+  const LAMPS = [[122, 250], [598, 250], [118, 418], [605, 418]];   // top lanterns on both pillars + the two wall lamps
   let titleBg = null, tl = null;
   function buildTitle() {
     const cv = $('title-cv'); fitCanvas(cv, W, H);
@@ -179,7 +179,7 @@
       const h = i === 0 ? fh : lh, anchor = i === 0 ? 0.6 : 0.5;
       rows.push({ i, left, y, island: { x: icx - iw / 2, y: y - anchor * h, w: iw, h }, sign: { x: scx - sw / 2, y: y - sh / 2, w: sw, h: sh } });
     }
-    return { top, panelTop, A, hw, cliff, E, cx, y0, step, rows, pathTop: y0 - step * 0.55, pathBot: panelTop + 30 };
+    return { top, panelTop, A, hw, cliff, E, cx, y0, step, rows, S: E + gap + 2 * u - hw, pathTop: y0 - step * 0.1, pathBot: panelTop + 30 };
   }
   // pixel-art sky, clouds and the chunky 3D cliff-edge path (1 canvas px = 2 CSS px)
   function drawMapBg() {
@@ -199,63 +199,66 @@
     L.rows.forEach((r, i) => { const opp = !r.left, ox = opp ? (L.cx - L.E - 40 * u) : (L.cx + L.E + 40 * u), oy = r.y + L.step * 0.02;
       if (i % 2 === 0 || i === 3) cloud(Math.round((ox + (opp ? -30 : 30) * u * (i % 3 === 0 ? 1 : .2)) / P), Math.round(oy / P), Math.round((8 + (i % 3) * 2) * u)); });
     cloud(Math.round((W - 30 * u) / P), Math.round((L.top + 6 * u) / P), Math.round(6 * u));
-    // ---- path: dirt top, grass rim, symmetric rock cliff walls (lit left, shaded right) ----
-    const A = L.A / P, hw = Math.round(L.hw / P), C = Math.round(L.cliff / P), D = 3, cx = L.cx / P, y0 = L.y0 / P, step = L.step / P;
+    // ---- winding path: smooth S-curves that swing out to touch each island in turn (dirt top, grass rim, 3D rock cliff walls) ----
+    // Rendered from a distance field around the centre-line, so the road keeps the same chunky width through every bend.
+    const hw = Math.round(L.hw / P), C = Math.round(L.cliff / P), D = 3, cx = L.cx / P, y0 = L.y0 / P, step = L.step / P, S = L.S / P;
     const ys = Math.floor(L.pathTop / P), ye = Math.min(h - 1, Math.ceil(L.pathBot / P));
-    const cAt = y => cx + A * Math.cos(Math.PI * (y - y0) / step);
-    const top = new Uint8Array(w * h), wall = new Uint8Array(w * h);
+    const shape = c => c * (1.5 - 0.5 * c * c);                       // flattens the turn at each island, steeper in between
+    const cAt = y => { const t = (y - y0) / step; if (t >= 0) return cx - S * shape(Math.cos(Math.PI * t));
+      const k = Math.min(1, -t / 0.1); return cx - S - S * 1.3 * k * k; };   // lead-in: the road starts tucked behind the Forest island
+    L.curve = y => (cAt(y / P)) * P;                                  // CSS-px centre-line, used by tests
+    const CX = new Float32Array(h + 8); for (let y = 0; y < h + 8; y++) CX[y] = cAt(Math.max(ys, y));
+    const RR = hw + C + 2;
+    // nearest distance from (x,y) to the centre-line segment set starting at ys (rounded cap at the top end)
+    const dist = (x, y) => { let best = 1e9; const a = Math.max(ys, Math.floor(y - RR)), b2 = Math.min(ye, Math.ceil(y + RR));
+      for (let yy = a; yy <= b2; yy++) { const dx = x - CX[yy], dy = y - yy, d = dx * dx + dy * dy; if (d < best) best = d; }
+      return Math.sqrt(best); };
+    const top = new Uint8Array(w * h), wall = new Uint8Array(w * h), dT = new Float32Array(w * h).fill(99), dW = new Float32Array(w * h).fill(99);
     const jit = []; for (let y = 0; y < h; y++) jit.push([R() < .22 ? 1 : 0, R() < .22 ? 1 : 0, R() < .3 ? 1 : 0, R() < .3 ? 1 : 0]);
-    const rowL = new Int16Array(h).fill(-1), rowR = new Int16Array(h).fill(-1);
-    for (let y = ys; y <= ye; y++) {
-      let half = hw; const dy = y - ys; if (dy < hw) half = Math.round(Math.sqrt(Math.max(0, hw * hw - (hw - dy) * (hw - dy))));
-      const c = cAt(y), l = Math.round(c - half) - jit[y][0], r = Math.round(c + half) + jit[y][1];
-      rowL[y] = l; rowR[y] = r;
-      for (let x = Math.max(0, l); x <= Math.min(w - 1, r); x++) top[y * w + x] = 1;
-    }
-    // wall = top widened by C on both sides and dropped by D, minus the top itself. value: 1 = left face, 2 = right face, 3 = front (under)
-    for (let y = ys; y <= Math.min(h - 1, ye + D); y++) {
-      const sy = Math.max(ys, y - D); if (rowL[sy] < 0) continue;
-      let half = hw + C; const dy = y - ys; const H2 = hw + C; if (dy < H2) half = Math.round(Math.sqrt(Math.max(0, H2 * H2 - (H2 - dy) * (H2 - dy))));
-      const jb = jit[(y >> 2) % h], c = cAt(sy), l = Math.round(c - half) - jb[2], r = Math.round(c + half) + jb[3];
-      for (let x = Math.max(0, l); x <= Math.min(w - 1, r); x++) { const i = y * w + x; if (top[i]) continue; wall[i] = x < c - hw * 0.6 ? 1 : x > c + hw * 0.6 ? 2 : 3; }
+    for (let y = Math.max(0, ys - 1); y <= Math.min(h - 1, ye + D + 1); y++) {
+      for (let x = 0; x < w; x++) {
+        const i = y * w + x, left = x < CX[y];
+        const dt = dist(x, y); dT[i] = dt;
+        if (y >= ys - 0 && dt <= hw + 0.5 - (left ? jit[y][0] : jit[y][1])) { top[i] = 1; continue; }
+        const dw = dist(x, y - D); dW[i] = dw;
+        const jb = jit[(y >> 2) % h];
+        if (dw <= hw + C + 0.5 - (left ? jb[2] : jb[3])) wall[i] = left ? 1 : 2;
+      }
     }
     const solid = (x, y) => x >= 0 && y >= 0 && x < w && y < h && (top[y * w + x] || wall[y * w + x]);
     for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (!solid(x, y)) {
       if (solid(x - 3, y - 2) && !solid(x - 1, y)) { g.fillStyle = 'rgba(20,60,110,.30)'; g.fillRect(x, y, 1, 1); }
       if (solid(x - 1, y) || solid(x + 1, y) || solid(x, y - 1) || solid(x, y + 1)) { g.fillStyle = '#2b1a0d'; g.fillRect(x, y, 1, 1); }
     }
-    // stone-block cliff faces, like the island undersides
-    const WL = new Int16Array(h).fill(-1), WR = new Int16Array(h).fill(-1);
-    for (let y = 0; y < h; y++) { let l = -1, r = -1; for (let x = 0; x < w; x++) if (wall[y * w + x] || top[y * w + x]) { if (l < 0) l = x; r = x; } WL[y] = l; WR[y] = r; }
+    // stone-block cliff faces, like the island undersides (courses follow the bends)
     const lit = ['#c19663', '#a77c4e', '#8c653e', '#5a3d26'], shd = ['#93704a', '#7a5a3a', '#634730', '#3e2a1a'];
     const bh = 4, hsh = []; for (let i = 0; i < 400; i++) hsh.push(R());
-    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const k = wall[y * w + x]; if (!k) continue;
-      const left = x < cAt(Math.max(ys, y - D)), pal = left ? lit : shd;
-      const lu = left ? x - WL[y] : WR[y] - x;                      // 0 at the outer edge
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const i = y * w + x, k = wall[i]; if (!k) continue;
+      const left = k === 1, pal = left ? lit : shd;
+      const lu = Math.max(0, Math.round(hw + C - dW[i]));               // 0 at the outer edge
       const row = Math.floor((y + (left ? 0 : 2)) / bh), ry = (y + (left ? 0 : 2)) % bh;
       const split = 2 + ((hsh[(row * 2 + (left ? 0 : 1)) % 400] * 3) | 0);
       let c;
-      if (ry === bh - 1 || lu === split) c = pal[3];                  // mortar seams
-      else if (ry === 0 || lu === split + 1) c = pal[0];              // lit top/left of each stone
+      if (ry === bh - 1 || lu === split) c = pal[3];
+      else if (ry === 0 || lu === split + 1) c = pal[0];
       else c = hsh[(row * 7 + lu * 3 + (left ? 1 : 5)) % 400] < .5 ? pal[1] : pal[2];
       if (lu === 0) c = pal[3];
-      const above = top[(y - 1) * w + x] || top[(y - 2) * w + x];
+      const above = (y > 0 && top[i - w]) || (y > 1 && top[i - 2 * w]);
       if (above && hsh[(x * 11 + y) % 400] < .7) c = hsh[(x * 5) % 400] < .5 ? '#3f7d24' : '#2f6a1c';   // grass hanging over the lip
       g.fillStyle = c; g.fillRect(x, y, 1, 1); }
-    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { if (!top[y * w + x]) continue;
-      const e1 = !top[y * w + x - 1] || !top[y * w + x + 1] || !top[(y - 1) * w + x];
-      const e2 = !top[y * w + x - 2] || !top[y * w + x + 2] || !top[(y - 2) * w + x];
-      const e3 = !top[y * w + x - 3] || !top[y * w + x + 3];
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const i = y * w + x; if (!top[i]) continue;
+      const e = hw - dT[i], capE = y - ys;                               // e: distance in from the road edge
+      const e1 = e < 1.3 || !top[i - 1] || !top[i + 1] || !top[i - w], e2 = e < 2.3 || !top[i - 2 * w], e3 = e < 3.3;
       let c;
-      if (e1) c = !top[y * w + x + 1] ? '#3f7d24' : '#4f9a30';
+      if (e1) c = x > CX[y] ? '#3f7d24' : '#4f9a30';
       else if (e2) c = R() < .7 ? '#5fa83a' : '#6cb840';
       else if (e3) c = R() < .35 ? '#5fa83a' : '#b98c52';
       else { const v = R(); c = v < .1 ? '#b98c52' : v < .18 ? '#e2bf84' : v < .21 ? '#a07a48' : '#d2a868'; }
       g.fillStyle = c; g.fillRect(x, y, 1, 1); }
     for (let y = ys + 4; y < ye; y += 3) {
-      const c = Math.round(cAt(y));
-      if (R() < .4) { const px = c - hw + 4 + ((R() * (2 * hw - 8)) | 0); g.fillStyle = '#8f8a84'; g.fillRect(px, y, 2, 1); g.fillStyle = '#c9c4bc'; g.fillRect(px, y - 1, 1, 1); g.fillStyle = '#a07a48'; g.fillRect(px, y + 1, 2, 1); }
-      if (R() < .3) { const px = c - hw + 4 + ((R() * (2 * hw - 8)) | 0); g.fillStyle = '#b98c52'; g.fillRect(px, y, 3, 1); }
+      const c = CX[y], ok = (px, wd) => { for (let q = -1; q <= wd; q++) for (let r = -1; r <= 1; r++) { const i = (y + r) * w + px + q; if (!top[i] || dT[i] > hw - 4) return false; } return true; };
+      if (R() < .4) { const px = Math.round(c - hw + 4 + R() * (2 * hw - 8)); if (ok(px, 2)) { g.fillStyle = '#8f8a84'; g.fillRect(px, y, 2, 1); g.fillStyle = '#c9c4bc'; g.fillRect(px, y - 1, 1, 1); g.fillStyle = '#a07a48'; g.fillRect(px, y + 1, 2, 1); } }
+      if (R() < .3) { const px = Math.round(c - hw + 4 + R() * (2 * hw - 8)); if (ok(px, 3)) { g.fillStyle = '#b98c52'; g.fillRect(px, y, 3, 1); } }
     }
   }
   function placeMap() {
@@ -327,20 +330,52 @@
   // ZOOPEDIA
   // =====================================================================================
   let zb = 0, zooFrom = 'title', zooBuilt = false;
+  // pixel textures for parchment and leather (generated once, used as CSS backgrounds)
+  function tex(seed, base, specks) {
+    const c = document.createElement('canvas'); c.width = c.height = 64; const g = c.getContext('2d'), R = rng(seed);
+    g.fillStyle = base; g.fillRect(0, 0, 64, 64);
+    for (const [col, n, sz] of specks) for (let i = 0; i < n; i++) { g.fillStyle = col; g.fillRect((R() * 64) | 0, (R() * 64) | 0, sz === 2 ? 1 + ((R() * 2) | 0) : 1, 1); }
+    return 'url(' + c.toDataURL() + ')';
+  }
+  document.documentElement.style.setProperty('--parch', tex(7, '#f4e5c3', [['#efdcb3', 260, 2], ['#f8ecd0', 160, 2], ['#e6d0a2', 60, 1], ['#dcc391', 14, 1]]));
+  document.documentElement.style.setProperty('--leather', tex(11, '#6a2c16', [['#5e2612', 300, 2], ['#773419', 220, 2], ['#4e1e0c', 70, 1], ['#86401f', 30, 1]]));
+  // biome bookmark tabs: colour + a tiny pixel glyph each
+  const TAB = {
+    forest: ['#3f8a2e', ['...X...', '..XXX..', '.XXXXX.', '..XXX..', '.XXXXX.', 'XXXXXXX', '...X...']],
+    ocean: ['#2f7fc6', ['.......', '.XX....', 'X..X..X', '....XX.', '.XX....', 'X..X..X', '....XX.']],
+    farm: ['#c99a2e', ['...X...', '..XXX..', '.XXXXX.', 'XX...XX', '.X.X.X.', '.X...X.', '.XXXXX.']],
+    arctic: ['#5fb2d9', ['X..X..X', '.X.X.X.', '..XXX..', 'XXXXXXX', '..XXX..', '.X.X.X.', 'X..X..X']],
+    oriental: ['#c4362e', ['..XXX..', '.XXXXX.', 'XX.X.XX', 'XX.X.XX', 'XX.X.XX', '.XXXXX.', '...X...']],
+    savannah: ['#df8a2a', ['XXXXXXX', '.XXXXX.', '...X...', '...X...', '...X...', '..XXX..', '.......']],
+    dinosaurs: ['#5f8a2a', ['X..X..X', 'X..X..X', '.X.X.X.', '..XXX..', '.XXXXX.', '.XXXXX.', '..XXX..']],
+    space: ['#46379a', ['...X...', '...X...', 'XXXXXXX', '.XXXXX.', '..XXX..', '.XX.XX.', 'X.....X']],
+  };
+  const tabCol = b => (TAB[D[b].key] || ['#8a5a2a'])[0];
+  function buildTabs() {
+    const box = $('tabs'); if (box.childElementCount) return;
+    D.forEach((bm, i) => {
+      const t = document.createElement('button'); t.className = 'tab'; t.dataset.b = i; t.setAttribute('role', 'tab'); t.setAttribute('aria-label', bm.name);
+      const [col, gl] = TAB[bm.key] || ['#8a5a2a', []]; t.style.setProperty('--tc', col);
+      const cv = document.createElement('canvas'); cv.width = 9; cv.height = 9; const g = cv.getContext('2d');
+      gl.forEach((row, y) => [...row].forEach((ch, x) => { if (ch === 'X') { g.fillStyle = 'rgba(0,0,0,.45)'; g.fillRect(x + 1, y + 2, 1, 1); } }));
+      gl.forEach((row, y) => [...row].forEach((ch, x) => { if (ch === 'X') { g.fillStyle = '#fff6dc'; g.fillRect(x + 1, y + 1, 1, 1); } }));
+      t.appendChild(cv); t.addEventListener('click', () => flipTo(i)); box.appendChild(t);
+    });
+  }
   function zooLayout() {
-    drawWood($('zoo-cv'));
-    const navH = 70 * u, navBot = 22 * u + sb, cntTop = 72 * u + st, cntH = 40 * u;
+    drawWood($('zoo-cv')); buildTabs();
+    const navH = 70 * u, navBot = 22 * u + sb, cntTop = 72 * u + st, cntH = 40 * u, tabsH = 28 * u;
     const nav = $('zoo-nav'); nav.style.bottom = navBot + 'px';
     const book = $('book');
-    const pageW = (W - 24 * u - 16 * u - 5 * u) / 2 - 12 * u;     // inner width of one page
-    const cd = Math.min(90 * u, pageW / 2 - 8 * u);
+    const pageW = (W - 24 * u - 30 * u - 20 * u) / 2 - 14 * u;     // inner width of one page (cover, stacks, page padding)
+    const cd = Math.min(84 * u, pageW / 2 - 6 * u);
     const rowH = cd + 34 * u;                                      // circle + two-line name
-    const want = 3 * rowH + 2 * 6 * u + 60 * u;                    // rows + gaps + page/cover padding
-    const regTop = cntTop + cntH + 14 * u, regBot = H - (navBot + navH + 16 * u);
+    const want = 3 * rowH + 2 * 6 * u + 38 * u + 52 * u;           // rows + gaps + page padding + cover/stacks
+    const regTop = cntTop + cntH + 12 * u + tabsH, regBot = H - (navBot + navH + 34 * u);
     const bh = Math.min(regBot - regTop, want * 1.3), cd2 = bh < want ? Math.max(40 * u, cd - (want - bh) / 3) : cd;
     const bt = regTop + Math.max(0, (regBot - regTop - bh) / 2);
     book.style.top = bt + 'px'; book.style.height = bh + 'px'; book.style.bottom = 'auto';
-    $('zoo-count').style.top = (bt - cntH - 14 * u) + 'px';
+    $('zoo-count').style.top = (bt - tabsH - cntH - 12 * u) + 'px';
     book.style.setProperty('--cd', cd2 + 'px');
     zooBuilt = true;
   }
@@ -354,61 +389,116 @@
       const cv = document.createElement('canvas'); c.appendChild(cv);
       const cd = parseFloat(getComputedStyle($('book')).getPropertyValue('--cd')) || 84;
       Art.draw(cv, b, t, cd);
-      d.addEventListener('click', () => openPopup(b, t));
+      d.addEventListener('click', () => { if (!flipping && !swiped) openPopup(b, t); });
       d.setAttribute('role', 'button'); d.setAttribute('aria-label', a.n);
     } else { d.classList.add('unfound'); c.innerHTML = '<div class="lockc">?</div>'; n.textContent = 'LOCKED'; n.classList.add('lk'); }
-    const lw = Math.max(...n.textContent.split(' ').map(x => x.length)); if (lw > 8) n.style.fontSize = (1.25 * 8 / lw) + 'rem';
+    const lw = Math.max(...n.textContent.split(' ').map(x => x.length)); if (lw > 7) { n.style.fontSize = (1.25 * 7 / lw) + 'rem'; n.style.letterSpacing = '0'; }
     return d;
   }
-  function renderBook() {
-    const L = $('pg-l'), Rp = $('pg-r'); L.innerHTML = ''; Rp.innerHTML = '';
-    const sd = document.createElement('div'); sd.className = 'spot signspot'; const si = document.createElement('img'); si.src = SIGN[zb]; si.alt = D[zb].name; sd.appendChild(si); L.appendChild(sd);
-    for (let t = 1; t <= 5; t++) L.appendChild(spot(zb, t));
-    for (let t = 6; t <= 11; t++) Rp.appendChild(spot(zb, t));
+  // fill one page of biome b: left = sign + tiers 1-5, right = tiers 6-11, page number at the foot
+  function fillPage(el, b, side) {
+    el.innerHTML = '';
+    if (side === 'l') {
+      const sd = document.createElement('div'); sd.className = 'spot signspot'; const si = document.createElement('img'); si.src = SIGN[b]; si.alt = D[b].name; sd.appendChild(si); el.appendChild(sd);
+      for (let t = 1; t <= 5; t++) el.appendChild(spot(b, t));
+    } else for (let t = 6; t <= 11; t++) el.appendChild(spot(b, t));
+    const pn = document.createElement('div'); pn.className = 'pgno'; pn.textContent = b * 2 + (side === 'l' ? 1 : 2); el.appendChild(pn);
+  }
+  function syncNav() {
     $('zoo-n').textContent = foundCount();
-    $('zoo-prev').disabled = zb === 0; $('zoo-next').disabled = zb === D.length - 1;
+    $('zoo-prev').disabled = $('zoo-cl').disabled = zb === 0; $('zoo-next').disabled = $('zoo-cr').disabled = zb === D.length - 1;
     $('book').dataset.biome = D[zb].key;
+    document.querySelectorAll('#tabs .tab').forEach((t, i) => { t.classList.toggle('on', i === zb); t.setAttribute('aria-selected', i === zb); });
+  }
+  function renderBook() {
+    fillPage($('pg-l'), zb, 'l'); fillPage($('pg-r'), zb, 'r'); syncNav();
     if (zb + 1 < D.length) Art.preload(zb + 1);
+    if (zb > 0) Art.preload(zb - 1);
   }
-  let flipping = false;
-  function flip(dir) {
-    const nb = zb + dir; if (nb < 0 || nb >= D.length || flipping) return;
-    flipping = true; const book = $('book'); book.classList.add(dir > 0 ? 'flipR' : 'flipL');
-    setTimeout(() => { zb = nb; renderBook(); book.classList.remove('flipR', 'flipL'); book.classList.add(dir > 0 ? 'flipL' : 'flipR'); void book.offsetWidth; book.classList.remove('flipL', 'flipR'); setTimeout(() => { flipping = false; }, 140); }, 140);
+  // copy a rendered page (canvases included) onto a leaf face
+  function copyPage(src, dst, side) {
+    dst.className = 'face ' + dst.classList[1] + ' page ' + (side === 'l' ? 'left' : 'right');
+    dst.innerHTML = src.innerHTML;
+    const a = src.querySelectorAll('canvas'), c = dst.querySelectorAll('canvas');
+    c.forEach((cv, i) => { const o = a[i]; if (!o) return; cv.width = o.width; cv.height = o.height; cv.style.cssText = o.style.cssText; try { cv.getContext('2d').drawImage(o, 0, 0); } catch (e) {} });
   }
+  let flipping = false, swiped = false;
+  const FLIP_MS = 620;
+  function flipTo(nb) {
+    if (nb === zb || nb < 0 || nb >= D.length || flipping) return;
+    const dir = nb > zb ? 1 : -1, leaf = $('leaf'), sp = $('spread'), pl = $('pg-l'), pr = $('pg-r');
+    const front = leaf.querySelector('.front'), back = leaf.querySelector('.back');
+    const src = dir > 0 ? pr : pl, r = src.getBoundingClientRect(), sr = sp.getBoundingClientRect();
+    flipping = true;
+    // the leaf starts as a copy of the page being turned; its back is the new spread's facing page
+    copyPage(src, front, dir > 0 ? 'r' : 'l');
+    const tmp = document.createElement('div'); fillPage(tmp, nb, dir > 0 ? 'l' : 'r');
+    back.className = 'face back page ' + (dir > 0 ? 'left' : 'right'); back.innerHTML = ''; while (tmp.firstChild) back.appendChild(tmp.firstChild);
+    fillPage(dir > 0 ? pr : pl, nb, dir > 0 ? 'r' : 'l');               // the page underneath already shows the new spread
+    Object.assign(leaf.style, { left: (r.left - sr.left) + 'px', top: (r.top - sr.top) + 'px', width: r.width + 'px', height: r.height + 'px',
+      transformOrigin: dir > 0 ? '0 50%' : '100% 50%', transition: 'none', transform: 'rotateY(0deg)' });
+    leaf.style.setProperty('--fd', FLIP_MS + 'ms'); sp.style.setProperty('--fd', FLIP_MS + 'ms');
+    leaf.classList.remove('hidden', 'go'); sp.classList.add('turning');
+    void leaf.offsetWidth;
+    leaf.classList.add('go');
+    leaf.style.transition = 'transform ' + FLIP_MS + 'ms cubic-bezier(.42,.02,.3,1)';
+    leaf.style.transform = 'rotateY(' + (dir > 0 ? -180 : 180) + 'deg)';
+    zb = nb; syncNav();
+    let done = false;
+    const finish = () => {
+      if (done) return; done = true;
+      fillPage(dir > 0 ? pl : pr, nb, dir > 0 ? 'l' : 'r');
+      leaf.classList.add('hidden'); leaf.classList.remove('go'); sp.classList.remove('turning');
+      front.innerHTML = ''; back.innerHTML = ''; flipping = false;
+      if (zb + 1 < D.length) Art.preload(zb + 1);
+    };
+    // end exactly when the turn's transition finishes (Web Animations, iOS 13.4+); plain timer otherwise
+    requestAnimationFrame(() => {
+      const an = leaf.getAnimations ? leaf.getAnimations().find(x => x.transitionProperty === 'transform') : null;
+      if (an && an.finished) { an.finished.then(finish, finish); setTimeout(finish, FLIP_MS * 8); }
+      else setTimeout(finish, FLIP_MS + 30);
+    });
+  }
+  const flip = dir => flipTo(zb + dir);
   $('zoo-prev').addEventListener('click', () => flip(-1));
   $('zoo-next').addEventListener('click', () => flip(1));
+  $('zoo-cl').addEventListener('click', () => flip(-1));
+  $('zoo-cr').addEventListener('click', () => flip(1));
   $('zoo-menu').addEventListener('click', () => show('title'));
+  // swipe to turn (touch); a swipe never opens a fun fact
+  { const sp = $('spread'); let sx = 0, sy = 0, tracking = false;
+    sp.addEventListener('touchstart', e => { const t = e.touches[0]; sx = t.clientX; sy = t.clientY; tracking = e.touches.length === 1; swiped = false; }, { passive: true });
+    sp.addEventListener('touchmove', e => { if (!tracking) return; const t = e.touches[0]; if (Math.abs(t.clientX - sx) > 12) swiped = true; }, { passive: true });
+    sp.addEventListener('touchend', e => { if (!tracking) return; tracking = false; const t = e.changedTouches[0], dx = t.clientX - sx, dy = t.clientY - sy;
+      if (Math.abs(dx) > 40 * u && Math.abs(dx) > Math.abs(dy) * 1.3) { swiped = true; flip(dx < 0 ? 1 : -1); setTimeout(() => { swiped = false; }, 60); } else swiped = false; });
+  }
+  addEventListener('keydown', e => { if (cur !== 'zoo' || popOpen) return; if (e.key === 'ArrowRight') flip(1); else if (e.key === 'ArrowLeft') flip(-1); });
   function openZoo(o) { zooFrom = (o && o.from) || 'title'; show('zoo'); }
   hooks.zoo = {
     enter() { zooLayout(); renderBook(); },
     back() { if (zooFrom === 'game') show('game', 'resume'); else show('title'); },
   };
 
-  // ---------- fun-fact popup ----------
+  // ---------- fun-fact page ----------
   let popB = 0, popT = 1, popOpen = false;
   function openPopup(b, t) {
     popB = b; popT = t; const a = D[b].animals[t - 1], el = $('popup');
     $('pop-name').textContent = a.n.toUpperCase();
-    $('pop-name').style.fontSize = a.n.length > 10 ? (3.6 * 10 / a.n.length) + 'rem' : '';
+    $('pop-name').style.fontSize = a.n.length > 10 ? (3.8 * 10 / a.n.length) + 'rem' : '';
     $('pop-sign').src = SIGN[b]; $('pop-sign').alt = D[b].name;
-    $('pop-tier').textContent = 'TIER ' + t + ' / 11';
-    $('pop-fact').innerHTML = '<b>FUN FACT:</b>'; $('pop-fact').appendChild(document.createTextNode(a.f));
-    Art.draw($('pop-badge'), b, t, 164 * u);
-    const evo = $('pop-evo'); evo.innerHTML = '';
-    for (let k = 1; k <= 11; k++) {
-      const e = document.createElement('div'); e.className = 'ev' + (k === t ? ' cur' : '');
-      if (isFound(b, k)) { const cv = document.createElement('canvas'); e.appendChild(cv); Art.draw(cv, b, k, 30 * u); e.addEventListener('click', () => openPopup(b, k)); e.setAttribute('aria-label', D[b].animals[k - 1].n); }
-      else { e.innerHTML = '<div class="lockc" style="--cd:' + (30 * u) + 'px">?</div>'; e.setAttribute('aria-label', 'Not found yet'); }
-      evo.appendChild(e);
-    }
+    $('pop-tier').textContent = 'TIER ' + t + '/11';
+    $('pop-fact').innerHTML = '<b>FUN FACT</b>'; $('pop-fact').appendChild(document.createTextNode(a.f));
+    document.querySelector('#popup .card').style.setProperty('--tc', tabCol(b));
     if (!popOpen) { el.classList.remove('hidden'); el.classList.add('fade'); void el.offsetWidth; requestAnimationFrame(() => el.classList.remove('fade')); popOpen = true; }
-    fitFact();
+    fitFact(b, t);
   }
-  function fitFact() { // shrink the fact text if a long fact would overflow the card
-    const f = $('pop-fact'), card = document.querySelector('#popup .card'); f.style.fontSize = '';
-    let fs = 1.32; const max = $('popup').clientHeight - 32 * u;
-    while (card.offsetHeight > max && fs > 0.95) { fs -= 0.04; f.style.fontSize = fs + 'rem'; }
+  function fitFact(b, t) { // big badge + large text; shrink the badge first, then the text, if a long fact would overflow
+    const f = $('pop-fact'), card = document.querySelector('#popup .card'), max = $('popup').clientHeight - 28 * u;
+    let bs = 190, fs = 1.6;
+    const apply = () => { Art.draw($('pop-badge'), b, t, bs * u); f.style.fontSize = fs + 'rem'; };
+    apply();
+    while (card.offsetHeight > max && bs > 120) { bs -= 10; apply(); }
+    while (card.offsetHeight > max && fs > 1.25) { fs -= 0.05; apply(); }
   }
   function closePopup(instant) {
     const el = $('popup'); if (!popOpen) return; popOpen = false;
@@ -449,7 +539,7 @@
     if (popOpen) openPopup(popB, popT);
   }, 140); });
 
-  window.ZMUI = { go: show, openZoo, toast, get screen() { return cur; }, openPopup, closePopup, get popupOpen() { return popOpen; }, isFound, foundCount };
+  window.ZMUI = { go: show, openZoo, toast, get screen() { return cur; }, openPopup, closePopup, get popupOpen() { return popOpen; }, isFound, foundCount, get flipping() { return flipping; }, get spread() { return zb; }, flipTo: b => flipTo(b) };
   const routeOf = () => ({ '#play': 'game', '#map': 'map', '#zoo': 'zoo', '#zoopedia': 'zoo', '#scores': 'scores' }[location.hash] || 'title');
   const route = routeOf();
   show(route, route === 'game' ? 'new' : undefined);
