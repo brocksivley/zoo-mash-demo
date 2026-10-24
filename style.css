@@ -24,14 +24,14 @@ button{font-family:inherit;-webkit-appearance:none;appearance:none;cursor:pointe
 #next{position:absolute;left:8px;top:calc(52px + var(--st));z-index:4;width:54px;padding:3px 0 5px;background:rgba(140,170,90,.88);
   border:2px solid #2d3d1c;border-radius:6px;text-align:center;box-shadow:0 3px 0 rgba(0,0,0,.35)}
 #next .lbl{font-size:11px;font-weight:700;color:#1c2610;letter-spacing:.5px}
-#next img{width:38px;height:38px;display:block;margin:1px auto 0}
+#next img{width:38px;height:38px;display:block;margin:1px auto 0;image-rendering:auto}
 #strip{position:absolute;left:0;right:0;bottom:0;z-index:4;padding:8px 6px calc(8px + var(--sb));
   background:repeating-linear-gradient(180deg,#7a4e2b 0 9px,#6b4325 9px 11px,#83552f 11px 20px,#6b4325 20px 22px);
   border-top:4px solid #3b2413;box-shadow:0 -3px 0 #a26c3d inset, 0 -2px 0 #2b190c}
 #slots{display:flex;justify-content:space-between;align-items:center;max-width:420px;margin:0 auto;padding:5px 6px;
   background:rgba(40,24,12,.55);border:2px solid #3b2413;border-radius:4px;box-shadow:0 0 0 2px #a26c3d inset}
 .slot{width:var(--slot);height:var(--slot);border-radius:50%;position:relative;flex:0 0 auto}
-.slot img{width:100%;height:100%;display:block}
+.slot img{width:100%;height:100%;display:block;image-rendering:auto} /* badges are pre-rendered at device res: smooth */
 .slot.locked{background:#8d8d8d;border:2px solid #4d4d4d;box-shadow:0 -3px 0 rgba(0,0,0,.18) inset;display:flex;align-items:center;justify-content:center;
   font-family:-apple-system,"Helvetica Neue",Arial,sans-serif;font-weight:800;font-size:calc(var(--slot)*.55);color:#fff;text-shadow:0 2px 0 #4d4d4d;line-height:1}
 .slot.pop{animation:pop .35s steps(4)}

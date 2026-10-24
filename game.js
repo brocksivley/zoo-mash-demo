@@ -26,7 +26,24 @@
   const FALL_G10 = 0.85;
   const GRACE = 2.0, WARN = 0.5, BOX_RATIO = 1.12, SPAWN_ABOVE = 40, SCALE_IN = 0.12;
   const STEP = 1000 / 240;                       // fixed physics substep (ms): 240 Hz so fast falls never tunnel
-  const SPRITE_FILL = 201 / (2 * 98.7);          // sprite png edge vs. circle outer edge
+  // Badge look. The circle (background fill, light rim, dark outline) is drawn as vector shapes at full device
+  // resolution; only the animal art comes from sprites/NN-name.png. Those PNGs are the original art with every
+  // source pixel blown up to an exact 4x4 block (nearest neighbour, offline), so smooth downscaling keeps it crisp.
+  // Per tier: circle centre x, y and outer radius in PNG pixels, plus the background colour sampled from the old badge.
+  const ART = [
+    [400.02, 400.37, 395.73, '#f1c5b7'],
+    [403.52, 403.12, 395.26, '#d8d5ca'],
+    [400, 404, 395.55, '#dee7bc'],
+    [403.56, 400.5, 395.96, '#f0d4b6'],
+    [400.01, 400, 395.55, '#dcccb7'],
+    [403.99, 400, 395.55, '#dbd7cd'],
+    [404.02, 403.1, 395.44, '#fad7b2'],
+    [404.02, 403.65, 395.71, '#e7d2b7'],
+    [399.46, 401.48, 394.9, '#d6d8d3'],
+    [403.52, 402.5, 394.92, '#d7c8b5'],
+    [404.02, 403.1, 395.44, '#d9c9b3'] ];
+  const RING_COL = '#090805', RIM_COL = '#fefaee';
+  const OUTLINE_W = 0.0253, RIM_W = 0.0101;      // outline / light rim thickness as a fraction of the radius (from the art)
 
   // ---- storage ----
   const LS_BEST = 'zoomash.forest.best', LS_SEEN = 'zoomash.forest.seen';
@@ -46,11 +63,18 @@
   const elOver = $('over'), elPause = $('pausemenu'), elSet = $('settings');
 
   // ---- sprites ----
-  const sprites = NAMES.map((n, i) => { const im = new Image(); im.src = (window.ZM_SPR && window.ZM_SPR[i]) || `sprites/${String(i + 1).padStart(2, '0')}-${n}.png`; return im; });
-  const spriteSrc = t => sprites[t - 1].src;
+  const sprites = NAMES.map((n, i) => { const im = new Image(); im.src = (window.ZM_SPR && window.ZM_SPR[i]) || `sprites/${String(i + 1).padStart(2, '0')}-${n}.png?v=hd1`; return im; });
+  // Badge images for the evolution strip and NEXT preview are drawn by the same code as the board (see badgeURL).
+  const BLANK = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+  let badgeURLs = [];
+  const spriteSrc = t => badgeURLs[t - 1] || BLANK;
+  let spritesReady = false;
+  Promise.all(sprites.map(im => im.decode ? im.decode().catch(() => new Promise(r => { if (im.complete) r(); else im.onload = im.onerror = r; }))
+                                         : new Promise(r => { if (im.complete) r(); else im.onload = im.onerror = r; })))
+    .then(() => { spritesReady = true; buildBadgeURLs(); renderStrip(); setNextUI(); });
 
   // ---- layout ----
-  let L = {}, dpr = 1;
+  let L = {}, dpr = 1, lastBadgeDpr = 0;
   function safeInsets() {
     const p = document.createElement('div');
     p.style.cssText = 'position:fixed;left:0;top:0;visibility:hidden;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)';
@@ -314,11 +338,13 @@
   function closePanels() { elPause.classList.add('hidden'); elSet.classList.add('hidden'); paused = false; }
   let toastT; function toast(msg) { const t = $('toast'); t.textContent = msg; t.classList.remove('hidden'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.add('hidden'), 1400); }
   $('pause').addEventListener('click', () => openPanel(elPause));
-  $('gear').addEventListener('click', () => openPanel(elSet));
+  $('gear').addEventListener('click', () => { if (gameOver) elSet.classList.remove('hidden'); else openPanel(elSet); });
   $('p-resume').addEventListener('click', closePanels);
   $('p-restart').addEventListener('click', () => reset());
-  $('p-main').addEventListener('click', () => toast('MAIN MENU · COMING SOON'));
-  $('p-zoo').addEventListener('click', () => toast('ZOOPEDIA · COMING SOON'));
+  // pause menu -> other screens (ui.js owns navigation)
+  $('p-main').addEventListener('click', () => { if (window.ZMUI) window.ZMUI.go('title'); });
+  $('p-zoo').addEventListener('click', () => { if (window.ZMUI) window.ZMUI.openZoo({ from: 'game' }); });
+  $('o-menu').addEventListener('click', () => { if (window.ZMUI) window.ZMUI.go('title'); });
   $('s-close').addEventListener('click', closePanels);
   $('again').addEventListener('click', () => reset());
   for (const k of ['vibration', 'sound', 'music']) {
@@ -355,9 +381,10 @@
       }
       aimX = L.left + (aimX - old.left) * s;
     }
+    badgeCache.length = 0; if (spritesReady && dpr !== lastBadgeDpr) { buildBadgeURLs(); setNextUI(); } lastBadgeDpr = dpr;
     renderStrip(); buildDecor();
   }
-  let rzT; window.addEventListener('resize', () => { clearTimeout(rzT); rzT = setTimeout(() => resize(false), 120); });
+  let rzT; window.addEventListener('resize', () => { clearTimeout(rzT); rzT = setTimeout(() => { if (active) resize(false); else needResize = true; }, 120); });
 
   // ---- static decor (pre-rendered pixel art: trunks + forest floor) ----
   let decor = null;
@@ -401,11 +428,64 @@
   }
 
   // ---- render ----
+  // Halving chain of each art PNG (808 -> 404 -> 202 -> 101 px). Each step averages exact 2x2 blocks, so small badges
+  // are downscaled cleanly in every browser regardless of imageSmoothingQuality support.
+  const mips = [];
+  function artLevel(t, want) {
+    const im = sprites[t - 1];
+    let ch = mips[t - 1];
+    if (!ch) {
+      ch = mips[t - 1] = [im];
+      let src = im, w = im.naturalWidth, h = im.naturalHeight;
+      while (w > 96) {
+        w = Math.ceil(w / 2); h = Math.ceil(h / 2);
+        const c = document.createElement('canvas'); c.width = w; c.height = h;
+        const g = c.getContext('2d'); g.imageSmoothingEnabled = true; g.imageSmoothingQuality = 'high';
+        g.drawImage(src, 0, 0, w, h); ch.push(c); src = c;
+      }
+    }
+    let i = 0; while (i + 1 < ch.length && ch[i + 1].width >= want) i++;
+    return ch[i];
+  }
+  // Paint tier t's badge, circle of outer radius R (canvas px) centred at (cx, cy), onto 2D context g.
+  function paintBadge(g, t, cx, cy, R) {
+    const [ax, ay, aR, bg] = ART[t - 1], ro = R, rr = R * (1 - OUTLINE_W), rb = R * (1 - OUTLINE_W - RIM_W);
+    g.save();
+    g.fillStyle = RIM_COL; g.beginPath(); g.arc(cx, cy, rr + 0.5, 0, Math.PI * 2); g.fill();          // light rim
+    g.fillStyle = bg; g.beginPath(); g.arc(cx, cy, rb, 0, Math.PI * 2); g.fill();                    // tinted fill
+    const s = R / aR, im = sprites[t - 1];
+    if (im.complete && im.naturalWidth) {
+      const lv = artLevel(t, im.naturalWidth * s);
+      g.beginPath(); g.arc(cx, cy, rr + 0.25, 0, Math.PI * 2); g.clip();
+      g.imageSmoothingEnabled = true; g.imageSmoothingQuality = 'high';
+      g.drawImage(lv, cx - ax * s, cy - ay * s, im.naturalWidth * s, im.naturalHeight * s);       // animal art
+    }
+    g.restore();
+    g.fillStyle = RING_COL; g.beginPath(); g.arc(cx, cy, ro, 0, Math.PI * 2); g.arc(cx, cy, rr, 0, Math.PI * 2, true); g.fill(); // outline
+  }
+  // Each tier is pre-rendered once at its exact on-screen device size; frames just blit (and rotate) that bitmap with
+  // smoothing, so there is no nearest-neighbour scaling or rotation of the art at draw time.
+  const BADGE_PAD = 2, badgeCache = [];
+  function badgeCanvas(t, r) {
+    const D = 2 * r * dpr, c0 = badgeCache[t - 1];
+    if (c0 && Math.abs(c0.D - D) < 0.01) return c0.c;
+    const im = sprites[t - 1]; if (!im.complete || !im.naturalWidth) return null;
+    const c = document.createElement('canvas'); c.width = c.height = 2 * Math.ceil(D / 2 + BADGE_PAD);
+    paintBadge(c.getContext('2d'), t, c.width / 2, c.height / 2, D / 2);
+    badgeCache[t - 1] = { D, c }; return c;
+  }
+  function buildBadgeURLs() {
+    const px = Math.max(96, Math.ceil(40 * dpr)), c = document.createElement('canvas'), g = c.getContext('2d');
+    c.width = c.height = px;
+    badgeURLs = NAMES.map((n, i) => { g.clearRect(0, 0, px, px); paintBadge(g, i + 1, px / 2, px / 2, px / 2 - 0.5); return c.toDataURL('image/png'); });
+  }
   function drawSprite(t, x, y, r, ang = 0, scale = 1) {
-    const im = sprites[t - 1]; if (!im.complete) return;
-    const d = 2 * r * SPRITE_FILL * scale;
-    ctx.imageSmoothingEnabled = d * dpr < im.naturalWidth; ctx.imageSmoothingQuality = 'high';
-    ctx.save(); ctx.translate(x, y); if (ang) ctx.rotate(ang); ctx.drawImage(im, -d / 2, -d / 2, d, d); ctx.restore();
+    const c = badgeCanvas(t, r); if (!c) return;
+    const w = c.width / dpr;
+    ctx.save(); ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+    if (!ang && scale === 1) { x = Math.round(x * dpr) / dpr; y = Math.round(y * dpr) / dpr; } // unrotated: land on device pixels
+    ctx.translate(x, y); if (ang) ctx.rotate(ang); if (scale !== 1) ctx.scale(scale, scale);
+    ctx.drawImage(c, -w / 2, -w / 2, w, w); ctx.restore();
   }
   // where the held animal's bottom would first touch an animal (anywhere under its footprint) or the floor
   function aimEnd(x, r) {
@@ -465,6 +545,7 @@
   const angK = Math.exp(-PHYS.angularDamping * STEP / 1000);
   let vCapB = 24; // max px per 1/60 s, refreshed on resize: 0.8 × smallest radius per 1/120 s substep
   function frame(t) {
+    if (!active) { running = false; return; }
     let dt = Math.min(0.1, (t - last) / 1000); last = t;
     if (!paused && !gameOver) {
       acc += dt * 1000;
@@ -496,9 +577,25 @@
     energy() { let e = 0, m = 0; for (const b of animals) { e += b.speed; m = Math.max(m, b.speed); } return { sum: e, max: m, n: animals.size }; },
   };
 
-  // ---- boot ----
-  renderStrip();
-  resize(true);
-  reset();
-  requestAnimationFrame(t => { last = t; frame(t); });
+  // ---- boot: the level only starts when ui.js enters the game screen ----
+  let active = false, running = false, booted = false, needResize = false;
+  function startLoop() { if (running) return; running = true; requestAnimationFrame(t => { last = t; frame(t); }); }
+  window.ZMGame = {
+    // mode 'new': fresh run. mode 'resume': back from the Zoopedia with the pause menu open.
+    enter(mode) {
+      active = true;
+      if (!booted) { booted = true; renderStrip(); resize(true); reset(); }
+      else {
+        if (needResize || window.innerWidth !== L.W || window.innerHeight !== L.H) { needResize = false; resize(false); }
+        if (mode === 'resume' && !gameOver) { renderStrip(); openPanel(elPause); }
+        else reset();
+      }
+      startLoop();
+    },
+    leave() { active = false; aiming = false; paused = true; elPause.classList.add('hidden'); },
+    get active() { return active; },
+    get best() { return best; },
+    seen() { return [...seen]; },
+    refreshSeen() { seen = new Set(ls.get(LS_SEEN, [])); best = ls.get(LS_BEST, 0) | 0; },
+  };
 })();
