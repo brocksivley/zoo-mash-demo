@@ -32,7 +32,11 @@
   const COMBO_BONUS = 10;                        // the k-th merge of a chain (k >= 2) adds COMBO_BONUS * (k - 1) on top
   const NEAR_HOLD = 0.25;                        // s an animal must sit near the line before the line starts pulsing
   const FX_CAP = 260, FX_CAP_LOW = 110;          // particle caps (normal / low-end mode)
-  const GRACE = 2.0, WARN = 0.5, BOX_RATIO = 1.12, SPAWN_ABOVE = 40, SCALE_IN = 0.12;
+  // v7.4 danger line: game over only after an animal sits over the line for OVER_HOLD s in a row (any animal; the clock
+  // keeps running if another one takes over without a gap). Just-dropped animals are ignored for DROP_IGNORE s, and an
+  // animal only starts the clock once it is calm (speed < CALM_V for CALM_T s), so one bouncing through doesn't count.
+  const OVER_HOLD = 3.0, DROP_IGNORE = 1.0, CALM_V = 2.0, CALM_T = 0.2;
+  const WARN = 0.25, BOX_RATIO = 1.12, SPAWN_ABOVE = 40, SCALE_IN = 0.12;
   const STEP = 1000 / 240;                       // fixed physics substep (ms): 240 Hz so fast falls never tunnel
   // Badge look. The circle (background fill, light rim, dark outline) is drawn as vector shapes at full device
   // resolution; only the animal art comes from sprites/NN-name.png. Those PNGs are the original art with every
@@ -181,7 +185,7 @@
     const r = radius(t);
     const b = Bodies.circle(x, y, r, { restitution: restOf(t), friction: PHYS.animalFriction, frictionStatic: PHYS.animalFrictionStatic,
       frictionAir: PHYS.airFriction, density: densOf(t), slop: 0.02, label: 'animal' }, 40);
-    b.zm = { tier: t, r, fresh, above: 0, born: now, merging: false };
+    b.zm = { tier: t, r, fresh, dropped: fresh, above: 0, calm: 0, over: false, born: now, merging: false };
     Body.setVelocity(b, { x: vx, y: vy });
     Composite.add(engine.world, b); animals.add(b);
     markSeen(t);
@@ -484,7 +488,7 @@
 
   function reset() {
     for (const b of [...animals]) removeAnimal(b);
-    mergeQ = []; pops.length = 0; fx.length = 0; lastDrop = null; fallTime = 0; clearJuice(); shk.a = 0; nearT = 0; danger = 'none';
+    mergeQ = []; pops.length = 0; fx.length = 0; lastDrop = null; fallTime = 0; clearJuice(); shk.a = 0; nearT = 0; danger = 'none'; overT = 0; overN = 0; overHold = false;
     score = 0; elScore.textContent = '0'; elBest.textContent = best.toLocaleString('en-US');
     current = rnd(); next = rnd(); setNextUI(); cardPend.clear(); markSeen(current, true);
     aimX = L.W / 2; canDropAt = now + 0.2; gameOver = false; paused = false; warnOn = false; dropsTotal = mergesTotal = 0;
@@ -500,21 +504,32 @@
 
   // ---- danger check ----
   // near: a settled animal's top within ~one small-animal height under the line, for NEAR_HOLD s -> the line pulses red
-  let nearT = 0, danger = 'none', nearK = 0;
-  function checkDanger(dt) {
-    let maxAbove = 0, gap = Infinity; const nearPx = Math.max(radius(3) * 2.2, L.Wi * 0.12);
+  // v7.4 over: one continuous clock (overT) for "some animal is over the line". It counts (simulated time, so pausing
+  // freezes it) while at least one eligible animal is calm with its top at/above the line; it holds while an eligible
+  // animal is over but still moving; it resets to 0 the moment no eligible animal is over. overT >= OVER_HOLD -> game over.
+  // Eligible = not fresh (has touched something), and if it was dropped, at least DROP_IGNORE s old.
+  let nearT = 0, danger = 'none', nearK = 0, overT = 0, overN = 0, overHold = false, overMax = 0, lastCk = 0;
+  const overLog = [];
+  function checkDanger() {
+    const sdt = Math.max(0, Math.min(0.1, now - lastCk)); lastCk = now;
+    let gap = Infinity, anyOver = false, counting = 0; const nearPx = Math.max(radius(3) * 2.2, L.Wi * 0.12);
     for (const b of animals) {
       const z = b.zm;
-      if (z.fresh) { z.above = 0; continue; }
-      if (b.position.y - z.r < L.dangerY) z.above += dt; else z.above = 0;
-      if (z.above > maxAbove) maxAbove = z.above;
+      z.calm = b.speed < CALM_V ? z.calm + sdt : 0;
+      const ok = !z.fresh && !(z.dropped && now - z.born < DROP_IGNORE);
+      const top = b.position.y - z.r <= L.dangerY;
+      z.over = false;
+      if (ok && top) { anyOver = true; z.above += sdt; if (z.calm >= CALM_T) { counting++; z.over = true; } } else z.above = 0;
       if (b.speed < 6) gap = Math.min(gap, b.position.y - z.r - L.dangerY);
     }
-    nearT = gap < nearPx ? nearT + dt : 0;
+    if (!anyOver) { if (overT > 0) overLog.push({ t: +now.toFixed(2), reset: +overT.toFixed(2) }); overT = 0; overHold = false; }
+    else if (counting) { overT += sdt; overHold = false; } else overHold = true;
+    overN = counting; if (overT > overMax) overMax = overT; if (overLog.length > 40) overLog.shift();
+    nearT = gap < nearPx ? nearT + sdt : 0;
     nearK = gap < nearPx ? Math.min(1, Math.max(0, 1 - gap / nearPx)) : 0;
-    warnOn = maxAbove >= WARN;
+    warnOn = overT >= WARN;
     danger = warnOn ? 'warn' : nearT >= NEAR_HOLD ? 'near' : 'none';
-    if (maxAbove >= GRACE && !gameOver) endGame();
+    if (overT >= OVER_HOLD && !gameOver) { overLog.push({ t: +now.toFixed(2), over: +overT.toFixed(2) }); endGame(); }
   }
 
   // ---- input ----
@@ -732,7 +747,7 @@
     if (decor) ctx.drawImage(decor, 0, 0, decor.width * 2, decor.height * 2);
     // danger line
     ctx.save();
-    const flash = warnOn && Math.floor(now * 6) % 2 === 0;
+    const wk = Math.min(1, overT / OVER_HOLD), flash = warnOn && !gameOver && Math.floor(now * (4 + 14 * wk * wk)) % 2 === 0; lastFlash = flash;   // v7.4: 2 Hz -> 9 Hz blink as the clock runs out
     if (danger === 'near' && !gameOver) {
       // stepped red pulse (4 steps, faster the closer the stack is), plus a 2-row pixel glow band above the line
       const hz = 1.6 + nearK * 1.6, st = [0, 1, 2, 1][Math.floor(now * hz * 4) % 4];
@@ -740,7 +755,12 @@
       ctx.fillStyle = col; ctx.globalAlpha = [0.12, 0.22, 0.32][st];
       ctx.fillRect(L.left, L.dangerY - 6, L.right - L.left, 4); ctx.globalAlpha = [0.06, 0.12, 0.18][st]; ctx.fillRect(L.left, L.dangerY - 10, L.right - L.left, 4);
       ctx.globalAlpha = 1; ctx.strokeStyle = col; ctx.lineWidth = 2 + st;
-    } else { ctx.strokeStyle = flash ? '#ff2a1a' : 'rgba(214,64,40,.9)'; ctx.lineWidth = flash ? 3 : 2; }
+    } else if (warnOn && !gameOver) {
+      // v7.4 warning: blinking line + red glow band that grows as the 3 s run out
+      ctx.fillStyle = '#ff2a1a'; ctx.globalAlpha = flash ? 0.30 + 0.25 * wk : 0.10;
+      ctx.fillRect(L.left, L.dangerY - 6, L.right - L.left, 12); ctx.globalAlpha = flash ? 0.14 + 0.12 * wk : 0.05; ctx.fillRect(L.left, L.dangerY - 12, L.right - L.left, 24); ctx.globalAlpha = 1;
+      ctx.strokeStyle = flash ? '#ff2a1a' : '#b8301e'; ctx.lineWidth = flash ? 4 : 2;
+    } else { ctx.strokeStyle = 'rgba(214,64,40,.9)'; ctx.lineWidth = 2; }
     ctx.setLineDash([8, 6]); ctx.beginPath(); ctx.moveTo(L.left, L.dangerY); ctx.lineTo(L.right, L.dangerY); ctx.stroke();
     ctx.restore();
     // held animal + aim line
@@ -758,8 +778,15 @@
     for (const b of animals) {
       const age = now - b.zm.born; let s = age < SCALE_IN && !b.zm.fresh ? 0.6 + 0.4 * (age / SCALE_IN) : 1, sy = s;
       if (b.zm.pop != null) { const q = now - b.zm.pop, f = POP_FR[Math.floor(q / 0.05)]; if (f) { s = f[0]; sy = f[1]; } else b.zm.pop = null; }
-      if (b.zm.above > WARN && warnOn) { ctx.save(); ctx.globalAlpha = 0.35; ctx.fillStyle = '#ff2a1a'; ctx.beginPath(); ctx.arc(b.position.x, b.position.y, b.zm.r + 3, 0, 7); ctx.fill(); ctx.restore(); }
-      drawSprite(b.zm.tier, b.position.x, b.position.y, b.zm.r, b.angle, s, sy);
+      let bx = b.position.x;
+      const hot = warnOn && !gameOver && b.zm.over;                         // v7.4: the animal(s) keeping the clock running
+      if (hot) {
+        bx += Math.round(Math.sin(now * 55 + b.id) * (0.6 + 1.6 * wk));      // small shake, a bit stronger near the end
+        ctx.save(); ctx.globalAlpha = 0.22 + 0.18 * wk * (flash ? 1 : 0.6); ctx.fillStyle = '#ff2a1a';
+        ctx.beginPath(); ctx.arc(bx, b.position.y, b.zm.r + 3, 0, 7); ctx.fill(); ctx.restore();
+      }
+      drawSprite(b.zm.tier, bx, b.position.y, b.zm.r, b.angle, s, sy);
+      if (hot) { ctx.save(); ctx.globalAlpha = 0.16 + 0.14 * wk; ctx.fillStyle = '#ff2a1a'; ctx.beginPath(); ctx.arc(bx, b.position.y, b.zm.r * 0.97, 0, 7); ctx.fill(); ctx.restore(); }
     }
     drawFx(renderDt);
     // score pops
@@ -784,7 +811,7 @@
     const low = perf.forced != null ? perf.forced : (perf.low || (perf.n > 120 && perf.avg > 22));
     if (low !== perf.low) { perf.low = low; if (window.ZMAmb && window.ZMAmb.setLow) window.ZMAmb.setLow(low); }
   }
-  let lastShake = [0, 0];
+  let lastShake = [0, 0], lastFlash = false;
   // ---- loop ----
   let last = performance.now(), acc = 0;
   const angK = Math.exp(-PHYS.angularDamping * STEP / 1000);
@@ -805,7 +832,7 @@
         }
         acc -= STEP; now += STEP / 1000;
       }
-      checkDanger(dt);
+      checkDanger();
     } else acc = 0;
     renderDt = dt; render();
     if (window.ZMAmb) { const run = !paused && !gameOver && !document.hidden; window.ZMAmb.tick(run ? dt : 0, run); }
@@ -829,6 +856,14 @@
     dismissCard,
     testCard(b, t) { cardQ.push({ b, t }); if (!cardOn) nextCard(); },  // v7.3 test hook: queue a card for any biome/tier
     get card() { const el = $('newcard'); return { on: !!cardOn, cur: cardOn ? Object.assign({}, cardOn) : null, queue: cardQ.length, log: cardLog.slice(), cls: el.className }; },
+    get over() { return { t: +overT.toFixed(3), n: overN, hold: overHold, warn: warnOn, max: +overMax.toFixed(3), limit: OVER_HOLD, ignore: DROP_IGNORE, flash: lastFlash, hz: +((4 + 14 * Math.min(1, overT / OVER_HOLD) ** 2) / 2).toFixed(2), danger, log: overLog.slice(), now: +now.toFixed(3),
+      animals: [...animals].map(b => ({ t: b.zm.tier, x: +b.position.x.toFixed(1), y: +b.position.y.toFixed(1), top: +(b.position.y - b.zm.r).toFixed(1), fresh: b.zm.fresh, dropped: b.zm.dropped, age: +(now - b.zm.born).toFixed(2), calm: +b.zm.calm.toFixed(2), over: b.zm.over, v: +b.speed.toFixed(2) })) }; },
+    resetOverMax() { overMax = 0; overLog.length = 0; },
+    // v7.4 test hooks: a pinned (static) animal whose top sits at a given y, to hold something over / under the danger line
+    testPin(t, xFrac, top) { const b = makeAnimal(t, L.left + xFrac * L.Wi, top + radius(t), 0, 0, false); Body.setStatic(b, true); return b.id; },
+    testMove(id, top) { for (const b of animals) if (b.id === id) { Body.setPosition(b, { x: b.position.x, y: top + b.zm.r }); return true; } return false; },
+    testUnpin(id) { for (const b of animals) if (b.id === id) { removeAnimal(b); return true; } return false; },
+    testSpawnV(t, xFrac, y, vx, vy) { return makeAnimal(t, L.left + xFrac * L.Wi, y, vx, vy, false).id; },
     gameOverNow() { if (!gameOver) endGame(); },                     // v7.2 test hook (GAME OVER panel / MAIN MENU button)
     celebrate(b) { cbOpen(b == null ? B : b); }, cbHold(f) { if (!cb.on) return; cb.hold = f; cb.f = f; cbDraw(f); }, cbRelease() { cb.hold = null; cb.t0 = performance.now() - cb.f / CB_FPS * 1000; },
     get cb() { return { on: cb.on, b: cb.b, f: cb.f, hold: cb.hold, log: cb.log.slice() }; },
