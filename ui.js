@@ -23,7 +23,8 @@
   // v6: warm every Zoopedia image (88 animal arts + 8 signs) shortly after boot and decode them, so the book never trickles in
   const signIms = [];
   let preloadDone = false;
-  const preloadAll = new Promise(r => setTimeout(r, 60)).then(() => Promise.all([
+  // v7.5: starts only after the boot loader is gone, so it never slows the title down
+  const preloadAll = (window.ZMBoot ? window.ZMBoot.ready : Promise.resolve()).then(() => new Promise(r => setTimeout(r, 60))).then(() => Promise.all([
     ...D.flatMap((x, b) => Array.from({ length: 11 }, (y, i) => Art.load(b, i + 1).catch(() => {}))),
     ...SIGN.map(u => { const im = new Image(); im.src = u; signIms.push(im); return im.decode ? im.decode().catch(() => {}) : new Promise(z => { im.onload = im.onerror = z; }); })
   ])).then(() => { preloadDone = true; });
@@ -120,7 +121,7 @@
     const s = Math.min(W * 1.12 / 720, Math.max(W / 720, H * 0.9 / 1280));
     const iw = 720 * s, ih = 1280 * s, x0 = (W - iw) / 2;
     tl = { s, x0, y0: 0, ih };
-    const k = Math.max(1, Math.min(3, Math.floor(s * dpr)));          // sharp-bilinear: integer NN blow-up, then smooth fit
+    const k = Math.max(1, Math.min(2, Math.floor(s * dpr)));          // sharp-bilinear: integer NN blow-up (v7.5: capped at 2x, WebKit canvas memory), then smooth fit
     const nn = document.createElement('canvas'); nn.width = 720 * k; nn.height = 1280 * k;
     const ng = nn.getContext('2d'); ng.imageSmoothingEnabled = false; ng.drawImage(titleIm, 0, 0, nn.width, nn.height);
     const bg = document.createElement('canvas'); bg.width = cv.width; bg.height = cv.height;
@@ -133,8 +134,14 @@
     }
     const gr = g.createLinearGradient(0, H * 0.6, 0, H); gr.addColorStop(0, 'rgba(10,5,2,0)'); gr.addColorStop(1, 'rgba(10,5,2,.5)');
     g.fillStyle = gr; g.fillRect(0, H * 0.6, W, H * 0.4);
-    titleBg = bg; nn.width = nn.height = 0;
+    nn.width = nn.height = 0;
+    // v7.5: WebKit can silently hand back an empty canvas (image not decoded yet / canvas memory pressure) -> verify the bake,
+    // fall back to a direct draw, and if it is still empty leave titleBg null so the next frame retries (never show a half title)
+    const filled = () => { try { return g.getImageData(bg.width >> 1, bg.height >> 2, 1, 1).data[3] > 0; } catch (e) { return true; } };
+    if (!filled()) { g.drawImage(titleIm, x0, 0, iw, ih); if (!filled()) { titleBg = null; titleFails++; bg.width = bg.height = 0; return; } }
+    titleBg = bg;
   }
+  let titleFails = 0;
   titleIm.onload = () => { buildTitle(); };
   const BIRD = [['X.....X', '.X...X.', '..XXX..', '...X...'], ['.......', '..XXX..', '.XX.XX.', 'X.....X']];
   function drawBird(g, x, y, f, p, col) {
@@ -547,7 +554,7 @@
       Art.draw($('mp-icon'), b, ISL[b].icon, 64 * u); $('mp-play').classList.add('pulse');
     }
   }
-  $('mp-play').addEventListener('click', () => { const b = selected; if (b < 0 || !unlockedB(b)) return; selected = -1; show('game', { mode: 'new', biome: b }); });
+  $('mp-play').addEventListener('click', () => { const b = selected; if (b < 0 || !unlockedB(b)) return; selected = -1; wipeTo('game', { mode: 'new', biome: b }); });   // v7.5: pixel-wipe transition
   // Islands: plants sway (rows of canopy shift by whole source pixels), the animal hops when its island is selected; the rock never moves.
   function drawIslands(t) { for (let b = 0; b < ISL.length; b++) if (islCv[b]) drawIsland(b, t); }
   function drawIsland(b, t) {
@@ -610,6 +617,9 @@
     $('scr-map').appendChild(ov);
     ua = { q: q.slice(), i: -1, b: -1, t0: 0, hold: null, ov, raf: 0, phase: 'wait', done: [] };
     nextUnlock(UA.delay);
+    { // v7.5: the reveal starts only once the boot loader / screen wipe is gone (never plays unseen under a cover)
+      const u = ua, go = () => { if (ua === u && ua.i === 0) ua.t0 = performance.now() + UA.delay * 1000; }, boot = window.ZMBoot && !window.ZMBoot.done;
+      if (wipe.on || boot) { ua.t0 = performance.now() + 6e4; if (wipe.on) wipe.after.push(go); else window.ZMBoot.ready.then(go); } }
     const tick = () => { if (!ua) return; ua.raf = requestAnimationFrame(tick); uaRender(); };
     ua.raf = requestAnimationFrame(tick);
   }
@@ -1274,8 +1284,88 @@
     if (popOpen) openPopup(popB, popT);
   }, 140); });
 
+
+  // =====================================================================================
+  // v7.5 TRANSITIONS: a pixel-block wipe covers the screen (with the biome's sign when starting a level), the next screen is
+  // built and fully drawn underneath (backdrop, HUD, sprites decoded + 2 frames), then the blocks clear and it appears all at once.
+  // =====================================================================================
+  const waitIm = im => new Promise(r => { const fin = () => (im.decode ? im.decode().then(r, r) : r()); if (im.complete && im.src) fin(); else { im.addEventListener('load', fin, { once: true }); im.addEventListener('error', r, { once: true }); } });
+  const loadIm = u => { const im = new Image(); im.src = u; return waitIm(im); };
+  const frames2 = () => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+  const sleepMs = ms => new Promise(r => setTimeout(r, ms));
+  const thOf = b => ISL[b].k;
+  const bgSrcOf = b => b === 0 ? 'forest-bg.jpg' : 'bg/' + thOf(b) + '.png' + (thOf(b) === 'space' ? '?v=fd7' : '');
+  function gameAssets(b) { return Promise.all([loadIm(bgSrcOf(b)), loadIm('ui-themes/tex/' + thOf(b) + '.png'), b ? Promise.all(Array.from({ length: 11 }, (x, i) => Art.load(b, i + 1).catch(() => {}))) : Promise.resolve()]); }
+  function gameDrawn() {   // after ZMGame.enter: art decoded and the animated backdrop baked
+    const t0 = performance.now();
+    return new Promise(r => { (function w() { const a = window.ZMAmb ? window.ZMAmb.state() : { bgReady: true };
+      if ((window.ZMGame.spritesReady && a.bgReady) || performance.now() - t0 > 6000) r(); else setTimeout(w, 16); })(); }).then(frames2);
+  }
+  function screenReady(name, opt) {
+    if (name === 'title') return Promise.all([titleIm, penPlate, penSheet, bearSheet, monkSheet, catSheet].map(waitIm))
+      .then(() => Promise.all([titleIm, penPlate, penSheet, bearSheet, monkSheet, catSheet].map(im => im.decode ? im.decode().catch(() => {}) : 0)))
+      .then(async () => { for (let i = 0; i < 40 && !titleBg; i++) { buildTitle(); if (!titleBg) await sleepMs(50); } }).then(frames2);
+    if (name === 'map') return Promise.all([...ISL.flatMap(o => [o.base, o.ani]), islLocked, padImg, nolockImg].map(waitIm)).then(frames2);
+    if (name === 'game') return gameDrawn();
+    return frames2();
+  }
+  const WIPE_COL = ['#16301a', '#0c2a44', '#3b2a12', '#3a7fa8', '#3c1518', '#7a400e', '#3f4a14', '#0e0b26'];   // v7.5c: arctic glacier blue, savannah sunset orange, jurassic moss olive (were too close to ocean / farm / forest)
+  const wipe = { on: false, phase: '', target: '', log: [], after: [] };
+  const wpEl = document.createElement('div'); wpEl.id = 'wipe'; wpEl.className = 'hidden'; wpEl.setAttribute('aria-hidden', 'true');
+  wpEl.innerHTML = '<canvas></canvas><div class="wp-lab"><img alt=""><b></b></div>';
+  ['pointerdown', 'pointerup', 'click', 'touchstart', 'touchend'].forEach(e => wpEl.addEventListener(e, x => { x.stopPropagation(); x.preventDefault(); }, { passive: false }));
+  document.body.appendChild(wpEl);
+  const wpCv = wpEl.querySelector('canvas'), wpLab = wpEl.querySelector('.wp-lab');
+  let wpGrid = null;
+  function wpLayout() {
+    const d = Math.min(2, window.devicePixelRatio || 1), w = innerWidth, h = innerHeight, bs = Math.max(18, Math.round(Math.min(w, h) / 13));
+    wpCv.width = Math.ceil(w * d); wpCv.height = Math.ceil(h * d); wpCv.style.width = w + 'px'; wpCv.style.height = h + 'px';
+    const cols = Math.ceil(w / bs), rows = Math.ceil(h / bs), cells = [];
+    let seed = 7; const R = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+    for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) cells.push({ x: c * bs * d, y: r * bs * d, o: ((cols - 1 - c) / Math.max(1, cols - 1) * 0.35 + r / Math.max(1, rows - 1) * 0.65) * 0.7 + R() * 0.3, alt: (c + r) & 1 });
+    wpGrid = { cells, s: bs * d };
+  }
+  function wpDraw(p, out, col) {   // p 0..1. In: blocks appear in a diagonal sweep (top-right to bottom-left, dithered). Out: they clear in the same order.
+    const g = wpCv.getContext('2d'), s = wpGrid.s; g.clearRect(0, 0, wpCv.width, wpCv.height);
+    const k = p * 1.0001;
+    for (const c of wpGrid.cells) {
+      const e = Math.min(1, out ? (c.o * 0.85 + 0.15 - k) / 0.15 : (k - c.o * 0.85) / 0.15); if (e <= 0) continue;   // each block grows in / shrinks out; all full at the end of the wipe-in
+      const z = Math.max(2, Math.round(s * e / 2) * 2);
+      g.fillStyle = col[c.alt]; g.fillRect(c.x + (s - z) / 2, c.y + (s - z) / 2, z + 1, z + 1);
+    }
+  }
+  function wpAnim(ms, out, col) {
+    return new Promise(r => { const t0 = performance.now(); (function f() { const p = Math.min(1, (performance.now() - t0) / ms); wpDraw(p, out, col); if (p < 1) requestAnimationFrame(f); else r(); })(); });
+  }
+  const shade = (hex, f) => { const v = parseInt(hex.slice(1), 16), ch = i => Math.max(0, Math.min(255, Math.round(((v >> i) & 255) * f))); return 'rgb(' + ch(16) + ',' + ch(8) + ',' + ch(0) + ')'; };
+  async function wipeTo(name, opt) {
+    if (wipe.on || cur === name) return false;
+    const b = name === 'game' && opt && typeof opt === 'object' ? Math.max(0, Math.min(D.length - 1, opt.biome | 0)) : -1;
+    const base = b >= 0 ? WIPE_COL[b] : '#2a1a0c', col = [base, shade(base, 1.1)];
+    const rec = { to: name, b, t0: performance.now() }; wipe.log.push(rec);
+    wipe.on = true; wipe.target = name; wipe.phase = 'in'; wipe.after = [];
+    wpLayout(); wpDraw(0, false, col);
+    if (b >= 0) { const si = wpLab.querySelector('img'); si.src = SIGN[b]; si.alt = D[b].name; wpLab.querySelector('b').textContent = 'GET READY!'; wpLab.style.display = ''; } else wpLab.style.display = 'none';
+    wpLab.classList.remove('on'); wpEl.classList.remove('hidden');
+    const prep = b >= 0 ? gameAssets(b) : Promise.resolve();               // start loading during the wipe-in
+    await wpAnim(b >= 0 ? 280 : 240, false, col);
+    rec.covered = performance.now() - rec.t0; wipe.phase = 'hold';
+    if (b >= 0) wpLab.classList.add('on');
+    await prep;
+    const tShow = performance.now();
+    show(name, opt);                                                     // build the next screen under the cover
+    await screenReady(name, opt);
+    await sleepMs(Math.max(0, (b >= 0 ? 1380 : 200) - (performance.now() - tShow)));   // screen cross-fade done; v7.5b: biome sign + GET READY! held ~1 s longer (Brock)
+    rec.ready = performance.now() - rec.t0; wipe.phase = 'out';
+    wpLab.classList.remove('on');
+    await wpAnim(b >= 0 ? 320 : 260, true, col);
+    wpEl.classList.add('hidden'); rec.ms = Math.round(performance.now() - rec.t0);
+    wipe.on = false; wipe.phase = ''; wipe.target = '';
+    const fns = wipe.after; wipe.after = []; fns.forEach(f => { try { f(); } catch (e) { console.error(e); } });
+    return true;
+  }
   window.ZMUI = { get unlockAnim() { return ua ? { b: ua.b, phase: ua.phase, i: ua.i, queue: ua.q.slice(), done: ua.done.slice(), t: ua.hold != null ? ua.hold : (performance.now() - ua.t0) / 1000 } : null; }, get unlockLog() { return uaLog.slice(); }, unlockSeek: uaSeek, unlockRelease() { if (ua) { ua.t0 = performance.now() - (ua.hold || 0) * 1000; ua.hold = null; } }, get pendingUnlocks() { return pendList(); }, UA,
-    get hudFs() { return hudFs; }, fitHud, go: show, openZoo, toast, get screen() { return cur; }, openPopup, closePopup, get popupOpen() { return popOpen; }, isFound, foundCount, get flipping() { return flipping; }, get preloaded() { return preloadDone; }, preloadAll, get turnLog() { return turnLog.slice(); }, get spread() { return zb; }, flipTo: b => flipTo(b),
+    get hudFs() { return hudFs; }, fitHud, go: show, wipeTo, get wipe() { return { on: wipe.on, phase: wipe.phase, target: wipe.target, log: wipe.log.map(x => Object.assign({}, x)) }; }, screenReady, bootReady: null, openZoo, toast, get screen() { return cur; }, openPopup, closePopup, get popupOpen() { return popOpen; }, isFound, foundCount, get flipping() { return flipping; }, get preloaded() { return preloadDone; }, preloadAll, get turnLog() { return turnLog.slice(); }, get spread() { return zb; }, flipTo: b => flipTo(b),
     unlocked: unlockedB, foundIn, get mapSelected() { return selected; }, get mapLayout() { return mapL; },
     title: { get clock() { return TA.clock; }, get penguin() { return { mode: TA.pen.mode, taps: TA.pen.taps.length, falls: TA.pen.falls, waddles: TA.pen.waddles, pose: penPose() }; },
       get bear() { return Object.assign({ pose: bearPose() }, TA.bear); }, get monkey() { return Object.assign({ pose: monkPose() }, TA.monk); }, hitRect, hitAt, timing: { WADDLE, FALL_T, MONK_DUR, BEAR }, bearRng(fn) { bearRng = fn || Math.random; }, glyph: GLYPH,
@@ -1286,6 +1376,7 @@
   const routeOf = () => /^#play-\w+$/.test(location.hash) ? 'game' : ({ '#play': 'game', '#map': 'map', '#zoo': 'zoo', '#zoopedia': 'zoo', '#scores': 'scores' }[location.hash] || 'title');
   const route = routeOf();
   show(route, route === 'game' ? playOpt() : undefined);
+  window.ZMUI.bootReady = screenReady(route);                             // v7.5: the boot loader hides once this screen is fully drawn
   addEventListener('hashchange', () => { const r = routeOf(); if (r === cur) return; if (popOpen) closePopup(true); $('settings').classList.add('hidden'); if (r === 'zoo') openZoo({ from: 'title' }); else show(r, r === 'game' ? playOpt() : undefined); });
   requestAnimationFrame(loop);
 })();

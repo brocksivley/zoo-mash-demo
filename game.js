@@ -80,7 +80,10 @@
 
   // ---- sprites ----
   // Forest: the approved 4x sprites. Other biomes: art/<key>/NN.png painted by ZMArt (same 4x-NN + mip recipe).
-  const forestSprites = NAMES.map((n, i) => { const im = new Image(); im.src = (window.ZM_SPR && window.ZM_SPR[i]) || `sprites/${String(i + 1).padStart(2, '0')}-${n}.png?v=hd1`; return im; });
+  // v7.5: Forest sprites are requested only when Forest is entered (or warmed by the boot loader), so they never compete with the title art
+  const forestSprites = NAMES.map(() => new Image());
+  const forestSrc = (n, i) => (window.ZM_SPR && window.ZM_SPR[i]) || `sprites/${String(i + 1).padStart(2, '0')}-${n}.png?v=hd1`;
+  function ensureForest() { forestSprites.forEach((im, i) => { if (!im.src) im.src = forestSrc(NAMES[i], i); }); }
   let sprites = forestSprites, artGen = 0;
   // Badge images for the evolution strip and NEXT preview are drawn by the same code as the board (see badgeURL).
   const BLANK = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
@@ -91,6 +94,7 @@
                                    : new Promise(r => { if (im.complete) r(); else im.onload = im.onerror = r; })).then(() => im);
   function loadBiomeArt(b) {
     const gen = ++artGen; spritesReady = false; mips.length = 0; badgeCache.length = 0; badgeURLs = [];
+    if (b === 0) ensureForest();
     const ps = b === 0 ? forestSprites.map(waitImg) : Array.from({ length: 11 }, (_, i) => window.ZMArt.load(b, i + 1).catch(() => new Image()));
     Promise.all(ps).then(arr => {
       if (gen !== artGen) return;
@@ -556,11 +560,11 @@
   $('p-resume').addEventListener('click', closePanels);
   $('p-restart').addEventListener('click', () => reset());
   // pause menu -> other screens (ui.js owns navigation)
-  $('p-main').addEventListener('click', () => { if (window.ZMUI) window.ZMUI.go('title'); });
+  $('p-main').addEventListener('click', () => { if (window.ZMUI) (window.ZMUI.wipeTo || window.ZMUI.go)('title'); });   // v7.5: pixel-wipe transition
   // v7: CHANGE BIOME ends the round exactly like MAIN MENU (leave() clears juice/celebration; the next PLAY is a fresh round) and opens the map
-  $('p-biome').addEventListener('click', () => { if (window.ZMUI) window.ZMUI.go('map', { from: 'game', focus: B }); });
+  $('p-biome').addEventListener('click', () => { if (window.ZMUI) (window.ZMUI.wipeTo || window.ZMUI.go)('map', { from: 'game', focus: B }); });
   $('p-zoo').addEventListener('click', () => { if (window.ZMUI) window.ZMUI.openZoo({ from: 'game' }); });
-  $('o-menu').addEventListener('click', () => { if (window.ZMUI) window.ZMUI.go('title'); });
+  $('o-menu').addEventListener('click', () => { if (window.ZMUI) (window.ZMUI.wipeTo || window.ZMUI.go)('title'); });
   $('s-close').addEventListener('click', closePanels);
   $('again').addEventListener('click', () => reset());
   for (const k of ['vibration', 'sound', 'music']) {
@@ -899,6 +903,7 @@
     },
     leave() { active = false; aiming = false; paused = true; elPause.classList.add('hidden'); clearJuice(); cbClose(); },
     get active() { return active; },
+    get spritesReady() { return spritesReady; },                    // v7.5: the biome transition waits for this before revealing
     get best() { return best; },
     get biome() { return B; },
     bestOf(b) { return ls.get(lsKey(b, 'best'), 0) | 0; },

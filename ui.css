@@ -215,3 +215,11 @@ img.smooth{image-rendering:auto}
   text-shadow:.25rem 0 0 #1b120a,-.25rem 0 0 #1b120a,0 .25rem 0 #1b120a,0 -.25rem 0 #1b120a,.25rem .25rem 0 #1b120a,-.25rem .25rem 0 #1b120a,.25rem -.25rem 0 #1b120a,-.25rem -.25rem 0 #1b120a,0 .45rem 0 #1b120a}
 .isl img.ua-lock{position:absolute;image-rendering:auto;transform-origin:50% 30%}
 .sign.ua-pop{animation:isl-pop .42s steps(5) both}
+
+/* v7.5 screen transition: pixel-block wipe + biome sign (ui.js wipeTo) */
+#wipe{position:fixed;inset:0;z-index:9000;touch-action:none}
+#wipe canvas{position:absolute;left:0;top:0;image-rendering:pixelated}
+#wipe .wp-lab{position:absolute;left:50%;top:50%;display:flex;flex-direction:column;align-items:center;gap:14px;transform:translate(-50%,-54%) scale(.86);opacity:0;transition:opacity .16s ease,transform .2s cubic-bezier(.3,1.6,.6,1)}
+#wipe .wp-lab.on{opacity:1;transform:translate(-50%,-54%) scale(1)}
+#wipe .wp-lab img{width:min(64vw,260px);height:auto;filter:drop-shadow(0 6px 0 rgba(0,0,0,.35))}
+#wipe .wp-lab b{font-family:Pix,monospace;font-weight:700;font-size:16px;letter-spacing:.12em;color:#fff6d8;text-shadow:2px 0 #120a04,-2px 0 #120a04,0 2px #120a04,0 -2px #120a04,0 4px #120a04}
