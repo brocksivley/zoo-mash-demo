@@ -39,6 +39,7 @@
   // progression: Forest is always open; reaching the final tier (11) in a biome unlocks the next one. "Unlock all" opens everything.
   function unlockedB(b) { return b === 0 || unlockAll() || seenOf(b - 1).has(11); }
 
+  const uaHide = new Set();                                            // v7.2: unlocked islands still waiting for their map reveal
   // ---------- toast ----------
   let toastT;
   function toast(msg) { const t = $('toast'); t.textContent = msg; t.classList.remove('hidden'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.add('hidden'), 1300); }
@@ -396,7 +397,7 @@
       const left = i % 2 === 0, y = y0 + i * step;
       const icx = left ? cx - E - gap - iw / 2 : cx + E + gap + iw / 2;
       const scx = left ? icx - iw / 2 - sg - sw / 2 : icx + iw / 2 + sg + sw / 2;
-      const un = unlockedB(i), h = un ? iw * ISL[i].sz[1] / ISL[i].sz[0] : lh, anchor = un ? 0.6 : 0.5;
+      const un = mapUnl(i), h = un ? iw * ISL[i].sz[1] / ISL[i].sz[0] : lh, anchor = un ? 0.6 : 0.5;
       rows.push({ i, left, y, island: { x: icx - iw / 2, y: y - anchor * h, w: iw, h }, sign: { x: scx - sw / 2, y: y - sh / 2, w: sw, h: sh } });
     }
     return { top, panelTop, A, hw, cliff, E, cx, y0, step, rows, squeeze: MAP_SQ, span0: Y7 - Y0, gapG: G, hb, S: E + gap + 2 * u - hw, pathTop: y0 - step * 0.1, pathBot: panelTop + 30 };
@@ -484,7 +485,9 @@
   function placeMap() {
     mapL = mapLayout(); drawMapBg();
     const box = $('map-items'); box.innerHTML = ''; islCv = []; islSrc = [];
-    mapL.rows.forEach(r => {
+    mapL.rows.forEach(r => buildRow(r, box));
+  }
+  function buildRow(r, box) {
       const b = r.i, unlocked = mapUnl(b);
       const isl = document.createElement('div'); isl.className = 'isl' + (unlocked ? '' : ' locked'); isl.dataset.biome = b; isl.setAttribute('role', 'button'); isl.setAttribute('aria-label', D[b].name + (unlocked ? '' : ' (locked)'));
       Object.assign(isl.style, { left: r.island.x + 'px', top: r.island.y + 'px', width: r.island.w + 'px', height: r.island.h + 'px' });
@@ -499,7 +502,6 @@
       isl.addEventListener('click', tap); sg.addEventListener('click', tap);
       box.appendChild(isl); box.appendChild(sg);
       if (unlocked && selected === b) isl.classList.add('sel');
-    });
   }
   // Selection halo: a chunky pixel-art gold outline that hugs the island's silhouette (trees + rock), fading outward
   // through dithered rings. Built once per layout from the island art's alpha; CSS only pulses its opacity (cheap on iOS).
@@ -530,7 +532,7 @@
   }
   function tapIsland(b, el) {
     if (ua) return;                                                     // v7: ignore taps while the unlock animation runs
-    if (!unlockedB(b)) { el.classList.remove('shake'); void el.offsetWidth; el.classList.add('shake'); toast(b > 0 ? 'REACH TIER 11 IN ' + D[b - 1].name.toUpperCase() : 'LOCKED'); return; }
+    if (!unlockedB(b)) { el.classList.remove('shake'); void el.offsetWidth; el.classList.add('shake'); toast('LOCKED'); return; }   // v7.2: just LOCKED (no hint naming the previous biome)
     if (selected !== b) { selected = b; selT = performance.now(); }
     document.querySelectorAll('#map-items .isl').forEach(x => x.classList.toggle('sel', x === el));
     refreshPanel();
@@ -584,79 +586,166 @@
     const g = cv.getContext('2d'); g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, cv.width, cv.height);
     g.imageSmoothingEnabled = true; g.imageSmoothingQuality = 'high'; g.drawImage(islSrc[b], 0, 0, cv.width, cv.height);
   }
-  // ---- v7 map unlock animation (after BIOME COMPLETE! -> NEXT BIOME). Frame-based at 12 fps, chunky pixels:
-  // lock shakes (stepped) -> pops into grey chunks + gold sparkles -> island appears with its halo lighting up ->
-  // camera focuses the island -> it becomes the selected island (PLAY ready).
-  const UA_FPS = 12, UA = { shake: [4, 13], pop: 14, sparkEnd: 30, focus: [18, 30], select: 32, end: 40 };
+  // ---- v7.2 map unlock. BIOME COMPLETE! only queues the unlock (localStorage 'zoomash.pendingUnlocks'); it plays the next time
+  // the map opens: the camera eases in and spotlights the island (rest of the map dims) -> the padlock shakes, breaks and falls away ->
+  // the island goes grey -> full colour with a burst -> the biome NAME pops up big -> the camera eases back out and the island settles
+  // (selected, PLAY ready). ~3.6 s each, input blocked throughout, played once (cleared on completion), several play in order.
+  const LS_PEND = 'zoomash.pendingUnlocks';
+  const UA = { delay: .35, zin: [0, .7], shake: [.7, 1.5], brk: 1.5, color: [1.58, 2.15], name: [1.75, 3.0], zout: [2.9, 3.6], end: 3.6, gap: .3, Z: 1.75 };
+  const padImg = img('img/padlock-v72.png'), nolockImg = img('img/island-locked-nolock.png');
+  const PAD = { l: 156 / 426, t: 26 / 355, w: 114 / 426, h: 168 / 355 };   // padlock sprite inside island-locked.png
   let ua = null; const uaLog = [];
-  function mapUnl(b) { return unlockedB(b) && !(ua && ua.b === b && ua.f < UA.pop); }
-  function startUnlock(b, manual) {
-    stopUnlock(); ua = { b, f: -1, manual: !!manual, t0: performance.now(), iv: 0, spark: null }; uaLog.push({ b, t: Date.now() });
-    selected = -1; placeMap(); refreshPanel();
-    const tick = () => { if (!ua) return; const f = Math.floor((performance.now() - ua.t0) / 1000 * UA_FPS); while (ua && ua.f < f) uaStep(); };
-    if (!manual) ua.iv = setInterval(tick, 1000 / UA_FPS / 2);
-    uaStep();
-  }
-  function stopUnlock() { if (!ua) return; clearInterval(ua.iv); if (ua.spark) ua.spark.remove(); camera(0, 0, 1); ua = null; }
+  function pendList() { const v = ls.get(LS_PEND, []); return Array.isArray(v) ? v.filter((b, i) => Number.isInteger(b) && b > 0 && b < D.length && v.indexOf(b) === i) : []; }
+  function pendDrop(b) { ls.set(LS_PEND, pendList().filter(x => x !== b)); }
+  function mapUnl(b) { return unlockedB(b) && !uaHide.has(b); }
+  const ease = x => (x = Math.min(1, Math.max(0, x)), x < .5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2);
+  const span = (t, a) => Math.min(1, Math.max(0, (t - a[0]) / (a[1] - a[0])));
   function camera(dx, dy, sc) { [$('map-cv'), $('map-items')].forEach(e => { e.style.transformOrigin = '0 0'; e.style.transform = sc === 1 && !dx && !dy ? '' : `translate(${dx}px,${dy}px) scale(${sc})`; }); }
-  function uaStep() {
-    const f = ++ua.f, b = ua.b, row = mapL && mapL.rows.find(r => r.i === b); if (!row) { stopUnlock(); return; }
-    const isl = document.querySelector(`#map-items .isl[data-biome="${b}"]`), sg = document.querySelector(`#map-items [data-biome="${b}"]:not(.isl)`);
-    const q = Math.max(2, Math.round(3 * u));                                 // CSS px per fx pixel
-    if (f >= UA.shake[0] && f <= UA.shake[1] && isl) {                       // stepped shake, whole fx pixels, growing then settling
-      const k = f - UA.shake[0], dx = [0, -1, 1, -2, 2, -2, 2, -1, 1, 0][k] * q, dy = [0, 0, -1, 0, -1, 0, -1, 0, 0, 0][k] * q;
-      [isl, sg].forEach(e => e && (e.style.transform = `translate(${dx}px,${dy}px)`));
-    }
-    if (f === UA.pop) {                                                      // pop: rebuild as unlocked, halo lights up
-      placeMap();
-      const ni = document.querySelector(`#map-items .isl[data-biome="${b}"]`); if (ni) ni.classList.add('lit', 'unl');
-      const cv = document.createElement('canvas'); cv.className = 'ua-fx'; cv.setAttribute('aria-hidden', 'true');
-      const cxL = row.island.x + row.island.w / 2, cyL = row.island.y + row.island.h * 0.45, R = Math.max(row.island.w, row.island.h) * 0.9;
-      const gw = Math.ceil(2 * R / q), gh = gw; cv.width = gw; cv.height = gh;
-      Object.assign(cv.style, { left: (cxL - gw * q / 2) + 'px', top: (cyL - gh * q / 2) + 'px', width: gw * q + 'px', height: gh * q + 'px' });
-      $('map-items').appendChild(cv); ua.spark = cv; ua.sg = { x: row.sign.x + row.sign.w / 2 - (cxL - gw * q / 2), y: row.sign.y + row.sign.h / 2 - (cyL - gh * q / 2) };
-    }
-    if (ua.spark && f >= UA.pop && f <= UA.sparkEnd) drawSpark(ua.spark, f - UA.pop, q, ua.sg);
-    if (ua.spark && f > UA.sparkEnd) { ua.spark.remove(); ua.spark = null; }
-    if (f >= UA.focus[0] && f <= UA.focus[1]) {                              // camera focus: stepped push-in on the island, then back
-      const k = f - UA.focus[0], n = UA.focus[1] - UA.focus[0], e = [0, .25, .5, .75, 1, 1, 1, 1, 1, .75, .5, .25, 0][Math.round(k / n * 12)];
-      const sc = 1 + 0.1 * e, cx = row.island.x + row.island.w / 2, cy = row.island.y + row.island.h / 2;
-      const cl = (v, lo) => Math.round(Math.min(0, Math.max(lo, v)));      // never expose the map's edges
-      camera(cl((W / 2 - cx) * e * 0.5 - cx * (sc - 1), W - W * sc), cl((H * 0.45 - cy) * e * 0.5 - cy * (sc - 1), H - H * sc), sc);
-      const isl2 = document.querySelector(`#map-items .isl[data-biome="${b}"]`); if (isl2 && isl2.scrollIntoView && k === 0) isl2.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-    }
-    if (f === UA.select) { camera(0, 0, 1); selected = b; selT = performance.now(); document.querySelectorAll('#map-items .isl').forEach(x => x.classList.toggle('sel', +x.dataset.biome === b)); refreshPanel(); }
-    if (f >= UA.end) { const keep = ua.b; stopUnlock(); document.querySelectorAll('#map-items .isl.lit').forEach(x => x.classList.remove('lit', 'unl')); if (selected !== keep) { selected = keep; refreshPanel(); } }
+  // start the queue (called from map enter, after the map is built with the queued islands still drawn locked)
+  function startUnlocks(q) {
+    stopUnlock();
+    const ov = document.createElement('div'); ov.id = 'ua-ov'; ov.setAttribute('aria-hidden', 'true');
+    ov.innerHTML = '<div class="ua-vig"></div><canvas class="ua-fx"></canvas><div class="ua-name"><b></b><span>UNLOCKED!</span></div>';
+    ['pointerdown', 'pointerup', 'click', 'touchstart', 'touchend'].forEach(ev => ov.addEventListener(ev, e => { e.stopPropagation(); e.preventDefault(); }, { passive: false }));
+    $('scr-map').appendChild(ov);
+    ua = { q: q.slice(), i: -1, b: -1, t0: 0, hold: null, ov, raf: 0, phase: 'wait', done: [] };
+    nextUnlock(UA.delay);
+    const tick = () => { if (!ua) return; ua.raf = requestAnimationFrame(tick); uaRender(); };
+    ua.raf = requestAnimationFrame(tick);
   }
-  // sparkles: 4-point pixel stars stepping outward from the island + the lock breaking into grey chunks from the sign
-  function drawSpark(cv, s, q, sg) {
-    const g = cv.getContext('2d'), w = cv.width, h = cv.height, cx = w / 2, cy = h / 2; g.clearRect(0, 0, w, h);
-    const P = (x, y, ww, hh, c) => { g.fillStyle = c; g.fillRect(Math.round(x), Math.round(y), ww, hh); };
-    const star = (x, y, z, c) => { P(x, y, 1, 1, '#fff'); for (let i = 1; i <= z; i++) { P(x - i, y, 1, 1, c); P(x + i, y, 1, 1, c); P(x, y - i, 1, 1, c); P(x, y + i, 1, 1, c); } };
+  function nextUnlock(delay) {
+    ua.i++; if (ua.i >= ua.q.length) { endUnlocks(); return; }
+    ua.b = ua.q[ua.i]; ua.t0 = performance.now() + delay * 1000; ua.prep = false; ua.swapped = false; ua.chunks = null; ua.phase = 'wait';
+    uaLog.push({ b: ua.b, t: Date.now() });
+  }
+  function endUnlocks() {
+    const last = ua && ua.done.length ? ua.done[ua.done.length - 1] : -1;
+    stopUnlock();
+    if (last >= 0 && cur === 'map') { selected = last; selT = performance.now(); document.querySelectorAll('#map-items .isl').forEach(x => x.classList.toggle('sel', +x.dataset.biome === last)); refreshPanel(); }
+  }
+  function stopUnlock() {
+    if (!ua) return; cancelAnimationFrame(ua.raf); ua.ov.remove(); camera(0, 0, 1);
+    const dirty = uaHide.size > 0; ua = null; uaHide.clear();
+    document.querySelectorAll('#map-items .isl.lit').forEach(x => x.classList.remove('lit', 'unl'));
+    if (dirty && cur === 'map') placeMap();                          // interrupted: still-pending islands go back to the real state
+  }
+  function uaRow(b) { return mapL && mapL.rows.find(r => r.i === b); }
+  function uaFocus(b) {                                               // camera target, computed from the locked layout
+    const r = uaRow(b); if (!r) return null;
+    const x0 = Math.min(r.island.x, r.sign.x), x1 = Math.max(r.island.x + r.island.w, r.sign.x + r.sign.w);
+    const y0 = Math.min(r.island.y, r.sign.y), y1 = Math.max(r.island.y + r.island.h, r.sign.y + r.sign.h);
+    const fx = (x0 + x1) / 2, fy = (y0 + y1) / 2, Z = UA.Z;
+    const cy = (mapL.hb + mapL.panelTop) / 2 - 18 * u;
+    const cl = (v, lo) => Math.min(0, Math.max(lo, v));
+    return { r, fx, fy, w: x1 - x0, h: y1 - y0, tx: cl(W / 2 - fx * Z, W - W * Z), ty: cl(cy - fy * Z, H - H * Z),
+      icx: r.island.x + r.island.w / 2, icy: r.island.y + r.island.h * 0.42 };
+  }
+  function uaPrep() {                                                 // split the baked padlock off the grey island
+    const b = ua.b, isl = document.querySelector(`#map-items .isl[data-biome="${b}"]`); ua.f = uaFocus(b);
+    if (!isl || !ua.f) return false;
+    const im = isl.querySelector('img'); if (im) im.src = nolockImg.src;
+    const lk = document.createElement('img'); lk.className = 'ua-lock'; lk.src = padImg.src; lk.alt = '';
+    Object.assign(lk.style, { left: PAD.l * 100 + '%', top: PAD.t * 100 + '%', width: PAD.w * 100 + '%', height: PAD.h * 100 + '%' });
+    isl.appendChild(lk); ua.lock = lk; ua.isl = isl;
+    const sg = document.querySelector(`#map-items .lsign[data-biome="${b}"]`); ua.sg = sg;
+    const nm = ua.ov.querySelector('.ua-name'); nm.querySelector('b').textContent = D[b].name.toUpperCase();
+    // name sits under the zoomed island, inside the safe map area
+    const Z = UA.Z, f = ua.f, below = f.ty + (f.r.island.y + f.r.island.h) * Z + 6 * u;
+    nm.style.top = Math.min(below, mapL.panelTop - 96 * u) + 'px';
+    const fx = ua.ov.querySelector('.ua-fx'); fitCanvas(fx, W, H); ua.fxg = fx.getContext('2d'); ua.fxc = fx;
+    ua.prep = true; return true;
+  }
+  function uaSwap() {                                                 // the island becomes the real (unlocked) island, grey at first
+    const b = ua.b; uaHide.delete(b); mapL = mapLayout();
+    const r = uaRow(b), box = $('map-items');
+    box.querySelectorAll(`[data-biome="${b}"]`).forEach(e => e.remove());
+    buildRow(r, box);
+    const ni = box.querySelector(`.isl[data-biome="${b}"]`); if (ni) { ni.classList.add('lit', 'ua-grey'); ua.isl = ni; }
+    const ns = box.querySelector(`.sign[data-biome="${b}"]`); if (ns) { ns.classList.add('ua-pop'); ua.sg = ns; }
+    ua.lock = null; ua.swapped = true;
+  }
+  function uaSeek(t) { if (ua) ua.hold = t; uaRender(); }
+  function uaRender() {
+    if (!ua || ua.b < 0) return;
+    const now = performance.now(), t = ua.hold != null ? ua.hold : (now - ua.t0) / 1000;
+    if (t < 0) { ua.phase = 'wait'; return; }
+    if (!ua.prep && !uaPrep()) { pendDrop(ua.b); nextUnlock(0); return; }
+    const f = ua.f, Z = UA.Z;
+    // camera: eased in, hold, eased out (focus travels in a straight line to its spot)
+    const k = t < UA.zin[1] ? ease(span(t, UA.zin)) : t < UA.zout[0] ? 1 : 1 - ease(span(t, UA.zout));
+    const sc = 1 + (Z - 1) * k, dx = f.tx * k, dy = f.ty * k; camera(dx, dy, sc);
+    // spotlight: dim + vignette everywhere except a soft circle round the island
+    const sx = dx + f.fx * sc, sy = dy + f.fy * sc, R = Math.max(f.w, f.h) * 0.62 * sc;
+    ua.ov.querySelector('.ua-vig').style.background = `radial-gradient(circle ${Math.round(R * 1.5)}px at ${Math.round(sx)}px ${Math.round(sy)}px, rgba(6,10,30,0) 0, rgba(6,10,30,0) 62%, rgba(6,10,30,${(.74 * k).toFixed(3)}) 100%)`;
+    // padlock shake (stepped, growing)
+    if (ua.lock) {
+      if (t >= UA.shake[0] && t < UA.brk) {
+        const p = span(t, UA.shake), n = Math.floor((t - UA.shake[0]) * 22), s = n % 2 ? 1 : -1, amp = 1 + 6 * p * p;
+        ua.lock.style.transform = `translate(${s * amp * 0.5}%, ${(n % 4 === 0 ? -1 : 0) * amp * 0.3}%) rotate(${s * (2 + 10 * p)}deg)`;
+        if (ua.isl) ua.isl.style.transform = p > .5 ? `translateX(${(n % 2 ? .4 : -.4) * u}px)` : '';
+      } else ua.lock.style.transform = '';
+      if (t >= UA.brk) { ua.lock.style.visibility = 'hidden'; if (ua.isl) ua.isl.style.transform = ''; }
+      else ua.lock.style.visibility = '';
+    }
+    if (t >= UA.color[0] && !ua.swapped) uaSwap();
+    if (ua.swapped && ua.isl) { const p = span(t, UA.color); ua.isl.style.filter = p >= 1 ? '' : `grayscale(${(1 - p).toFixed(3)}) brightness(${(0.85 + 0.15 * p).toFixed(3)})`; }
+    // name: pops in big, holds, fades as the camera pulls back
+    const nm = ua.ov.querySelector('.ua-name'), np = (t - UA.name[0]) / 0.32;
+    if (t < UA.name[0] || t > UA.name[1] + 0.35) nm.style.opacity = 0;
+    else { const s = np < 1 ? [0.2, 0.7, 1.25, 1.3, 1.12, 1.0][Math.min(5, Math.floor(np * 6))] : 1; nm.style.opacity = t > UA.name[1] ? (1 - (t - UA.name[1]) / 0.35).toFixed(3) : 1; nm.style.transform = `translateX(-50%) scale(${s})`; }
+    ua.phase = t < UA.zin[1] ? 'zoom-in' : t < UA.brk ? 'shake' : t < UA.color[1] ? 'break' : t < UA.zout[0] ? 'name' : t < UA.end ? 'zoom-out' : 'done';
+    uaFx(t, dx, dy, sc);
+    if (t >= UA.end && ua.hold == null) {
+      const b = ua.b; ua.done.push(b); pendDrop(b);
+      if (ua.isl) { ua.isl.style.filter = ''; ua.isl.style.transform = ''; ua.isl.classList.remove('ua-grey'); }
+      camera(0, 0, 1); nextUnlock(UA.gap);
+    }
+  }
+  // screen-space pixel fx: the padlock in tumbling pieces, a white flash, gold star burst
+  function uaFx(t, dx, dy, sc) {
+    const g = ua.fxg; if (!g) return; const cw = ua.fxc.width, ch = ua.fxc.height, k = cw / W; g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, cw, ch);
+    if (t < UA.brk || t > UA.brk + 1.3) return;
+    g.setTransform(k, 0, 0, k, 0, 0); g.imageSmoothingEnabled = false;
+    const f = ua.f, r = f.r, s = t - UA.brk, q = Math.max(2, Math.round(3 * u * sc / 1.4));
     const hsh = n => { const v = Math.sin(n * 91.7 + 17.3) * 43758.5453; return v - Math.floor(v); };
-    if (s === 0) { for (let i = -6; i <= 6; i++) { P(cx + i, cy, 1, 1, '#fff'); P(cx, cy + i, 1, 1, '#fff'); } }
-    for (let i = 0; i < 18; i++) {
-      const a = i / 18 * Math.PI * 2 + hsh(i) * 0.3, rr = (w * 0.12) + s * (w * 0.028) * (0.7 + hsh(i + 9) * 0.6);
-      if (s > 10 && (i + s) % 2) continue;
-      const z = s < 4 ? 2 : s < 10 ? 1 : 0, c = ['#ffd75e', '#fff3b0', '#ffb43a'][(i + s) % 3];
-      star(cx + Math.cos(a) * rr, cy + Math.sin(a) * rr * 0.8, (s + i) % 4 === 0 ? z + 1 : z, c);
+    // padlock rect on screen (locked layout)
+    const lx = dx + (r.island.x + PAD.l * r.island.w) * sc, ly = dy + (r.island.y + PAD.t * r.island.h) * sc, lw = PAD.w * r.island.w * sc, lh = PAD.h * r.island.h * sc;
+    if (ready(padImg) && s < 1.2) {
+      const nw = padImg.naturalWidth, nh = padImg.naturalHeight, cols = 2, rows = 3;
+      for (let i = 0; i < cols * rows; i++) {
+        const cx = i % cols, cy = (i / cols) | 0, vx = (cx - 0.5) * (60 + 70 * hsh(i)) * u * sc, vy = (-150 - 90 * hsh(i + 7) + cy * 30) * u * sc, gr = 900 * u * sc;
+        const px = lx + (cx + .5) * lw / cols + vx * s, py = ly + (cy + .5) * lh / rows + vy * s + gr * s * s / 2, rot = (cx ? 1 : -1) * (2 + 4 * hsh(i + 3)) * s;
+        g.save(); g.globalAlpha = Math.max(0, 1 - Math.max(0, s - 0.7) / 0.5); g.translate(Math.round(px), Math.round(py)); g.rotate(Math.round(rot * 4) / 4);
+        g.drawImage(padImg, cx * nw / cols, cy * nh / rows, nw / cols, nh / rows, -lw / cols / 2, -lh / rows / 2, lw / cols, lh / rows); g.restore();
+      }
     }
-    if (sg && s < 12) {                                                      // lock chunks (from the sign's padlock)
-      const sx = sg.x / q, sy = sg.y / q;
-      for (let i = 0; i < 8; i++) { const a = -Math.PI / 2 + (i - 3.5) * 0.42, v = 2.2 + hsh(i + 3) * 1.2;
-        P(sx + Math.cos(a) * v * s, sy + Math.sin(a) * v * s + 0.18 * s * s, 3, 3, i % 2 ? '#8a8f94' : '#c9ced3'); P(sx + Math.cos(a) * v * s, sy + Math.sin(a) * v * s + 0.18 * s * s + 2, 3, 1, '#34383c'); }
+    const ix = dx + f.icx * sc, iy = dy + f.icy * sc;
+    const P = (x, y, w, h, c) => { g.fillStyle = c; g.fillRect(Math.round(x / q) * q, Math.round(y / q) * q, w * q, h * q); };
+    if (s < 0.16) { g.globalAlpha = 1 - s / 0.16; g.fillStyle = '#fff'; g.beginPath(); g.arc(lx + lw / 2, ly + lh / 2, (0.4 + s * 6) * lw, 0, 7); g.fill(); g.globalAlpha = 1; }
+    const sb = s - (UA.color[0] - UA.brk); if (sb < 0) return;
+    const star = (x, y, z, c) => { P(x, y, 1, 1, '#fff'); for (let i = 1; i <= z; i++) { P(x - i * q, y, 1, 1, c); P(x + i * q, y, 1, 1, c); P(x, y - i * q, 1, 1, c); P(x, y + i * q, 1, 1, c); } };
+    const n = 20, Rm = Math.max(r.island.w, r.island.h) * sc;
+    for (let i = 0; i < n; i++) {
+      const a = i / n * Math.PI * 2 + hsh(i) * .3, rr = Rm * (0.3 + sb * 1.1 * (0.7 + hsh(i + 9) * 0.6)), step = Math.floor(sb * 12);
+      if (sb > 0.6 && (i + step) % 2) continue;
+      const z = sb < 0.25 ? 2 : sb < 0.6 ? 1 : 0, c = ['#ffd75e', '#fff3b0', '#ffb43a'][(i + step) % 3];
+      g.globalAlpha = Math.max(0, 1 - Math.max(0, sb - 0.7) / 0.4); star(ix + Math.cos(a) * rr, iy + Math.sin(a) * rr * 0.8, (step + i) % 4 === 0 ? z + 1 : z, c);
     }
+    g.globalAlpha = 1;
   }
   hooks.map = {
     enter(o) {
-      selected = -1;
-      if (o && o.unlock >= 0 && o.unlock < D.length) { startUnlock(o.unlock, o.manual); return; }
+      selected = -1; stopUnlock();
+      let q = pendList().filter(b => unlockedB(b));
+      if (unlockAll()) { if (q.length) ls.set(LS_PEND, []); q = []; }           // everything is open anyway: nothing to reveal
+      q.forEach(b => uaHide.add(b));
       placeMap();
+      if (q.length) { refreshPanel(); startUnlocks(q); return; }
       if (o && o.focus >= 0 && unlockedB(o.focus)) { selected = o.focus; selT = performance.now(); placeMap(); }   // CHANGE BIOME: current biome pre-selected
       refreshPanel();
     },
     leave() { stopUnlock(); },
-    back() { show('title'); },
+    back() { if (ua) return; show('title'); },
   };
 
   // =====================================================================================
@@ -1175,12 +1264,17 @@
   hooks.game = { enter(o) { requestAnimationFrame(fitHud); if (o && typeof o === 'object') window.ZMGame.enter(o.mode || 'new', o.biome); else window.ZMGame.enter(o || 'new'); } };
   let rzT;
   addEventListener('resize', () => { clearTimeout(rzT); rzT = setTimeout(() => {
-    measure(); titleBg = null; islSrc = [];
-    if (cur === 'title') buildTitle(); else if (cur === 'map') { placeMap(); refreshPanel(); } else if (cur === 'zoo') { zooLayout(); renderBook(); } else if (cur === 'scores') renderScores();
+    const w0 = W, h0 = H; measure(); titleBg = null; islSrc = [];
+    if (cur === 'title') buildTitle();
+    else if (cur === 'map') {
+      if (ua) { if (W !== w0 || H !== h0) hooks.map.enter(); }             // v7.2: a real size change restarts an unfinished reveal (pending flags kept); spurious resize events are ignored
+      else { placeMap(); refreshPanel(); }
+    }
+    else if (cur === 'zoo') { zooLayout(); renderBook(); } else if (cur === 'scores') renderScores();
     if (popOpen) openPopup(popB, popT);
   }, 140); });
 
-  window.ZMUI = { get unlockAnim() { return ua ? { b: ua.b, f: ua.f } : null; }, get unlockLog() { return uaLog.slice(); }, unlockStep(n) { for (let i = 0; i < (n || 1) && ua; i++) uaStep(); return ua ? ua.f : -1; }, UA,
+  window.ZMUI = { get unlockAnim() { return ua ? { b: ua.b, phase: ua.phase, i: ua.i, queue: ua.q.slice(), done: ua.done.slice(), t: ua.hold != null ? ua.hold : (performance.now() - ua.t0) / 1000 } : null; }, get unlockLog() { return uaLog.slice(); }, unlockSeek: uaSeek, unlockRelease() { if (ua) { ua.t0 = performance.now() - (ua.hold || 0) * 1000; ua.hold = null; } }, get pendingUnlocks() { return pendList(); }, UA,
     get hudFs() { return hudFs; }, fitHud, go: show, openZoo, toast, get screen() { return cur; }, openPopup, closePopup, get popupOpen() { return popOpen; }, isFound, foundCount, get flipping() { return flipping; }, get preloaded() { return preloadDone; }, preloadAll, get turnLog() { return turnLog.slice(); }, get spread() { return zb; }, flipTo: b => flipTo(b),
     unlocked: unlockedB, foundIn, get mapSelected() { return selected; }, get mapLayout() { return mapL; },
     title: { get clock() { return TA.clock; }, get penguin() { return { mode: TA.pen.mode, taps: TA.pen.taps.length, falls: TA.pen.falls, waddles: TA.pen.waddles, pose: penPose() }; },

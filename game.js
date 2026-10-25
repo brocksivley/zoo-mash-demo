@@ -357,13 +357,18 @@
     renderStrip(t);
     // v7: the first tier-11 of a biome whose next biome was still locked -> BIOME COMPLETE celebration (once per biome,
     // remembered in localStorage; never in Unlock-all mode, where nothing is actually being unlocked)
-    const celebrate = t === 11 && B < D.length - 1 && !ls.get('zoomash.demo.unlockAll', false) && !ls.get(lsKey(B, 'celebrated'), false);
+    // v7.2: the next biome's reveal is queued for the next map visit (no jump to the map, so the run and its score carry on);
+    // the last biome (SPACE) has nothing to unlock but still gets its celebration
+    const unlAll = !!ls.get('zoomash.demo.unlockAll', false);
+    if (t === 11 && B < D.length - 1 && !unlAll) queueUnlock(B + 1);
+    const celebrate = t === 11 && !unlAll && !ls.get(lsKey(B, 'celebrated'), false);
     if (celebrate) { cbOpenSoon(B); return; }
     if (quiet) cardPend.add(t); else newCard(t);
     // progression: reaching this biome's tier-11 animal unlocks the next biome on the map
     if (t === 11 && B < D.length - 1) toast(D[B + 1].name + ' UNLOCKED!');
   }
-  // ---- v7 BIOME COMPLETE! celebration: frame-based (12 fps) chunky pixel confetti + fireworks, banner, two buttons ----
+  function queueUnlock(b) { const k = 'zoomash.pendingUnlocks'; let a = ls.get(k, []); if (!Array.isArray(a)) a = []; if (!a.includes(b)) a.push(b); ls.set(k, a); }
+  // ---- v7 BIOME COMPLETE! celebration: frame-based (12 fps) chunky pixel confetti + fireworks, banner, one KEEP PLAYING button (v7.2) ----
   const CB_FPS = 12, CB_PX = 3;                                        // 1 fx pixel = 3 CSS px
   const CB_COL = ['#ffd75e', '#e84a3c', '#4fc3f7', '#9fe36b', '#ff8ad8', '#ffffff', '#ff9f2e'];
   const cbH = n => { const v = Math.sin(n * 127.1 + 311.7) * 43758.5453; return v - Math.floor(v); };   // stable per-particle hash
@@ -379,7 +384,7 @@
     $('cb-name').textContent = a.n.toUpperCase();
     $('cb-no').textContent = 'No.' + String(b * 11 + 11).padStart(2, '0');
     $('cb-biome').textContent = D[b].name.toUpperCase();
-    $('cb-unl').textContent = D[b + 1].name.toUpperCase() + ' UNLOCKED!';
+    $('cb-unl').textContent = b < D.length - 1 ? D[b + 1].name.toUpperCase() + ' UNLOCKED!' : 'ALL BIOMES COMPLETE!';
     el.classList.remove('hidden', 'in'); void el.offsetWidth; el.classList.add('in');
     cb = { on: true, b, f: 0, hold: null, t0: performance.now(), raf: 0, log: cb.log };
     cb.log.push({ b, at: +now.toFixed(2) });
@@ -418,7 +423,6 @@
   }
   window.addEventListener('resize', () => { if (cb.on) { cbSize(); cbDraw(cb.f); } });
   $('cb-keep').addEventListener('click', () => { cbClose(); paused = false; chain = 0; lastMergeAt = -9; canDropAt = Math.max(canDropAt, now + 0.25); });
-  $('cb-next').addEventListener('click', () => { const b = cb.b; cbClose(); if (window.ZMUI) window.ZMUI.go('map', { unlock: b + 1 }); });
   // ---- "NEW ANIMAL!" card: first time a tier is created in a biome (not shown for entries Unlock all revealed) ----
   const cardQ = []; let cardOn = null, cardT = 0, cardLog = [];
   function newCard(t) {
@@ -811,6 +815,7 @@
     get perf() { return { avg: +perf.avg.toFixed(1), n: perf.n, low: perf.low, cap: perf.low ? FX_CAP_LOW : FX_CAP }; },
     setLow(v) { perf.forced = v == null ? null : !!v; perfSample(0.016); },
     dismissCard,
+    gameOverNow() { if (!gameOver) endGame(); },                     // v7.2 test hook (GAME OVER panel / MAIN MENU button)
     celebrate(b) { cbOpen(b == null ? B : b); }, cbHold(f) { if (!cb.on) return; cb.hold = f; cb.f = f; cbDraw(f); }, cbRelease() { cb.hold = null; cb.t0 = performance.now() - cb.f / CB_FPS * 1000; },
     get cb() { return { on: cb.on, b: cb.b, f: cb.f, hold: cb.hold, log: cb.log.slice() }; },
     energy() { let e = 0, m = 0; for (const b of animals) { e += b.speed; m = Math.max(m, b.speed); } return { sum: e, max: m, n: animals.size }; },

@@ -152,3 +152,10 @@ button{font-family:inherit;-webkit-appearance:none;appearance:none;cursor:pointe
 @keyframes cb-bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-4px)}}
 @keyframes cb-glint{0%,100%{color:#ffd75e}50%{color:#fff3b0}}
 @media (prefers-reduced-motion:reduce){#celebrate.in .cb-panel,#celebrate.in .cb-banner,#celebrate.in .cb-b,#celebrate.in .cb-banner span{animation:none}}
+/* v7.2: GAME OVER panel respects the safe areas; MAIN MENU is a real full-size button (it was unstyled: ui.css resets buttons) */
+#over{padding:calc(10px + var(--st, 0px)) 10px calc(10px + var(--sb, 0px))}
+#over .panel{max-height:100%;overflow:auto}
+#again,#o-menu{display:block;width:100%;min-height:52px;font-size:20px;font-weight:700;padding:12px;color:#fff;line-height:1.1}
+#o-menu{margin-top:12px;background:#8a5a32;border:3px solid #3b2413;box-shadow:0 3px 0 #3b2413,0 0 0 2px #c48a52 inset;text-shadow:0 2px 0 #3b2413}
+#again:active{transform:translateY(2px);box-shadow:0 1px 0 #2c4414}
+#o-menu:active{transform:translateY(2px);box-shadow:0 1px 0 #3b2413,0 0 0 2px #c48a52 inset}
