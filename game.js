@@ -377,7 +377,7 @@
   function cbOpen(b) {
     if (!active || gameOver) { if (b < D.length - 1) toast(D[b + 1].name + ' UNLOCKED!'); return; }
     ls.set(lsKey(b, 'celebrated'), true);
-    clearTimeout(cbT); clearJuice(); cardQ.length = 0; nextCard(); aiming = false;
+    clearTimeout(cbT); clearJuice(); cardQ.length = 0; nextCard(true); aiming = false;
     elPause.classList.add('hidden'); elSet.classList.add('hidden'); paused = true;
     const a = D[b].animals[10], el = $('celebrate');
     $('cb-img').src = spriteSrc(11);
@@ -429,18 +429,30 @@
     if (ls.get('zoomash.demo.unlockAll', false)) return;
     cardQ.push({ b: B, t }); if (!cardOn) nextCard();
   }
-  function nextCard() {
-    clearTimeout(cardT); const el = $('newcard');
+  let cardOutT = 0;
+  function nextCard(instant) {
+    clearTimeout(cardT); clearTimeout(cardOutT); const el = $('newcard');
     const c = cardQ.shift(); cardOn = c || null;
-    if (!c) { el.classList.remove('on'); el.classList.add('hidden'); return; }
+    if (!c) {                                                           // v7.3: slide back down, revealing the evolution bar again
+      const vis = !el.classList.contains('hidden') && !instant;
+      el.classList.remove('on');
+      if (!vis) { el.classList.remove('out'); el.classList.add('hidden'); return; }
+      el.classList.add('out'); cardOutT = setTimeout(() => { el.classList.remove('out'); el.classList.add('hidden'); }, 210);
+      return;
+    }
     const a = D[c.b].animals[c.t - 1];
     el.querySelector('img').src = spriteSrc(c.t);
     el.querySelector('.nc-name').textContent = a.n.toUpperCase();
     el.querySelector('.nc-no').textContent = 'No.' + String(c.b * 11 + c.t).padStart(2, '0');
-    el.classList.remove('hidden', 'on'); void el.offsetWidth; el.classList.add('on');
+    el.classList.remove('hidden', 'on', 'out'); void el.offsetWidth; el.classList.add('on');
+    fitCardText(el);
     cardLog.push({ b: c.b, t: c.t, no: c.b * 11 + c.t, name: a.n }); if (cardLog.length > 40) cardLog.shift();
     buzz([12, 40, 12]);
     cardT = setTimeout(nextCard, cardQ.length ? 1400 : 2300);         // auto-dismiss (faster when more are waiting)
+  }
+  function fitCardText(el) {                                          // v7.3: long names shrink to fit the bar (then ellipsis as a last resort)
+    const nm = el.querySelector('.nc-name'); let fs = 19; nm.style.fontSize = '';
+    while (nm.scrollWidth > nm.clientWidth + 0.5 && fs > 11) { fs -= 1; nm.style.fontSize = fs + 'px'; }
   }
   function dismissCard() { if (cardOn) { cardQ.length = 0; nextCard(); } }
   $('newcard').addEventListener('pointerdown', e => { e.stopPropagation(); dismissCard(); });
@@ -476,7 +488,7 @@
     score = 0; elScore.textContent = '0'; elBest.textContent = best.toLocaleString('en-US');
     current = rnd(); next = rnd(); setNextUI(); cardPend.clear(); markSeen(current, true);
     aimX = L.W / 2; canDropAt = now + 0.2; gameOver = false; paused = false; warnOn = false; dropsTotal = mergesTotal = 0;
-    elOver.classList.add('hidden'); elPause.classList.add('hidden'); elSet.classList.add('hidden'); cbClose();
+    elOver.classList.add('hidden'); elPause.classList.add('hidden'); elSet.classList.add('hidden'); cbClose(); cardQ.length = 0; if (cardOn) nextCard(true);   // v7.3: a fresh round starts with the bar visible
   }
   function endGame() {
     gameOver = true; aiming = false; cardQ.length = 0; nextCard();
@@ -507,7 +519,7 @@
 
   // ---- input ----
   function px(e) { return e.clientX; }
-  canvas.addEventListener('pointerdown', e => { dismissCard(); if (gameOver || paused) return; aiming = true; aimX = px(e); try { canvas.setPointerCapture(e.pointerId); } catch (_) {} e.preventDefault(); });
+  canvas.addEventListener('pointerdown', e => { if (gameOver || paused) return; aiming = true; aimX = px(e); try { canvas.setPointerCapture(e.pointerId); } catch (_) {} e.preventDefault(); });
   canvas.addEventListener('pointermove', e => { if (!aiming) return; aimX = px(e); e.preventDefault(); });
   const up = e => { if (!aiming) return; aiming = false; aimX = px(e); drop(); e.preventDefault(); };
   canvas.addEventListener('pointerup', up);
@@ -815,6 +827,8 @@
     get perf() { return { avg: +perf.avg.toFixed(1), n: perf.n, low: perf.low, cap: perf.low ? FX_CAP_LOW : FX_CAP }; },
     setLow(v) { perf.forced = v == null ? null : !!v; perfSample(0.016); },
     dismissCard,
+    testCard(b, t) { cardQ.push({ b, t }); if (!cardOn) nextCard(); },  // v7.3 test hook: queue a card for any biome/tier
+    get card() { const el = $('newcard'); return { on: !!cardOn, cur: cardOn ? Object.assign({}, cardOn) : null, queue: cardQ.length, log: cardLog.slice(), cls: el.className }; },
     gameOverNow() { if (!gameOver) endGame(); },                     // v7.2 test hook (GAME OVER panel / MAIN MENU button)
     celebrate(b) { cbOpen(b == null ? B : b); }, cbHold(f) { if (!cb.on) return; cb.hold = f; cb.f = f; cbDraw(f); }, cbRelease() { cb.hold = null; cb.t0 = performance.now() - cb.f / CB_FPS * 1000; },
     get cb() { return { on: cb.on, b: cb.b, f: cb.f, hold: cb.hold, log: cb.log.slice() }; },
