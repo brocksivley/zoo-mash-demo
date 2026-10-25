@@ -313,7 +313,7 @@
       const k = stepKey(); if (k !== drawnKey) { draw(); drawnKey = k; } else skipped++;
     },
     setLow(v) { low = !!v; drawnKey = ''; },
-    state() { return { biome: key, t: +t.toFixed(3), running, frames, skipped, low, layers: layers.map(l => l.name), fps: layers.map(l => l.fps), canvas: !!cv.isConnected }; },
+    state() { return { biome: key, bgReady: !!bgArt, t: +t.toFixed(3), running, frames, skipped, low, layers: layers.map(l => l.name), fps: layers.map(l => l.fps), canvas: !!cv.isConnected }; },
     canvas: cv,
   };
 })();

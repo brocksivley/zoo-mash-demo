@@ -13,11 +13,106 @@
 <link rel="icon" href="icon-512.png">
 <link rel="manifest" href="manifest.webmanifest">
 <title>Zoo Mash</title>
-<link rel="stylesheet" href="style.css?v=v74a">
-<link rel="stylesheet" href="ui.css?v=v74a">
-<link rel="stylesheet" href="ui-themes/themes.css?v=v74a">
 </head>
 <body>
+<!-- v7.5 boot loader: inline (no network) so it paints before any image or the game CSS downloads; ZMBoot hides it once the title is fully drawn -->
+<style id="boot-css">
+@font-face{font-family:ZMBootPix;src:url(data:font/woff2;base64,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) format("woff2");font-weight:700;font-display:block}
+#boot{position:fixed;inset:0;z-index:2147483000;display:flex;align-items:center;justify-content:center;overflow:hidden;
+  background:linear-gradient(#4fb0e8 0 22%,#5cb9ec 22% 44%,#6cc4f0 44% 66%,#7fcdf3 66% 84%,#94d6f6 84%);
+  font-family:ZMBootPix,monospace;font-weight:700;-webkit-user-select:none;user-select:none;touch-action:none;transition:opacity .35s ease}
+#boot.out{opacity:0;pointer-events:none}
+#boot .bt-cl{position:absolute;width:8px;height:8px;background:#fff;opacity:.85;
+  box-shadow:8px 0 #fff,16px 0 #fff,24px 0 #fff,8px -8px #fff,16px -8px #fff,-8px 0 #fff,32px 0 #fff,16px -16px #fff,24px -8px #fff}
+#boot .bt-in{position:relative;display:flex;flex-direction:column;align-items:center;margin-top:-6vh}
+#boot .bt-title{font-size:min(18vw,78px);line-height:1;text-align:center;color:#fff6d8;letter-spacing:.04em;
+  text-shadow:4px 0 #173a63,-4px 0 #173a63,0 4px #173a63,0 -4px #173a63,4px 4px #173a63,-4px 4px #173a63,4px -4px #173a63,-4px -4px #173a63,0 9px #173a63,4px 9px #173a63,-4px 9px #173a63}
+#boot .bt-title span{display:block;color:#ffb347}
+#boot .bt-track{position:relative;width:min(72vw,290px);height:84px;margin-top:min(9vh,64px)}
+#boot .bt-bar{position:absolute;left:0;right:0;bottom:0;height:12px;border:4px solid #173a63;background:#d6f0fb;box-shadow:0 4px 0 rgba(23,58,99,.35)}
+#boot #bt-fill{position:absolute;left:0;top:0;bottom:0;width:0;background:#ff8a1f;box-shadow:inset 0 4px 0 #ffb347;transition:width .25s linear}
+#boot #bt-fish{position:absolute;left:0;bottom:26px;width:68px;height:60px;transition:transform .25s linear;will-change:transform}
+#boot .bt-fish{position:absolute;inset:0;background:url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAIgAAAAeCAYAAAD3hVYMAAAFZElEQVR42u2bb0gbdxjHv7nGNNJUEhRfxD9QMasYfbN1RrvRGljxzSiyoYMge7G+2YtawuibwayK7t1eBDdGx7AvSjimZUNG37hAla1dNSx9syrt4tIxTV4EmYdJ6Bk12Yv4O++SuyQa/d29uAcC6t15n/s+D8+f3/0C6KZbETOcxD+xWy1Z8e8xLmlQ42F0jpPnMJwEQFOdFV+/tYX6BjPiUR798waqougcp8dRcYDM9R0GaX2DGQCoi6JznB4HUwnEYEuVBCIe5RGP8qhvMGOwpaogxZ2WGDrH6XEYyk1XcnXMbrVkm+qs6KlJyV77dPsc1je5E6nDOoc6HMZyYOb6sqI6dghGILy9DIyNrcL5extruBu/hEfjXwAAJkYncf/hk2ylwugc9DmM5dQyUsPYsAlNdecwPeUFAPjZAD6t/6PgurvxSxg5gACAIc818KtBAMBsxJI9qig6h3ocJTMIgfAtZvB0Owdx4aILE6OT+GD3MQCzEJ0EYshzTbienHd7qAMA4N1Yw+V7OLIoOoc6HCWb1HiUh28xAwBwdztx4aILAMCvBgXIfCPnvHq5DH41CLurQziWfO9zzPVlZRslu9WSFX/U4tCKHlrgYIo5JsYlDf3zuYDyONIlofOj1M8GcHvojcIU6epQFGWwpQq/f3JWcpw2h5b0kDOaHEwxx5CRydvL4KeqdyU3kTNSz0iUypn1xQNwbQOS6BWbt5cRUigZ19Tg0IIeSoFKk4NRcgwZlcSdMElRSinP3N4lOSdXC+VhSBeeL76cSDQ5tKKHUqDS5mCUHPMLOwZ3t1MyJonN3N6V63IVjt+45ZNEY2z5OWLLz2UbLWIeRxrxKC+5B20OLekhF6i0ORglxxSLSmIf/VyNr/x/ldVU9c8b8PYPybK7c8KjBocW9FAKVNocjJJjxIsr+Ua64Jnrr+HtZeBbzGA4ZCsJ02A7L52xG1vx8fvvSNIqWRbON9ocWtBDLlBpczClHCMHc+OWT9I9e3sZxWXdgg48L53dfJMryCDEOQtLK6pxaEkPuUClxcGUcoySSHL9Q75DAYBrGwAABO84EbzjhN3VIYERPyQbNgn3q28wSx6OJodW9CgWqLQ4jMQxHvCCKD3hFCZGJyUwfDiIVy+XhRpI3g5KwELy0cm1DaD5YNLarsl1yh9+Gz04Wg1gBzEuaZiNWLIeh1gAE3UOreghl0EWllYAyhxGJcfcf/gkN0O3mIS05WcDGBl3KY5TQLUAOz3lxTdsADfx4ABAuiDzoysXpZfv7UheFA2HbOgJpwCYMBvZBSL0ObSgh91qycoFKm0ORuwY32IGbDjnmBiXNOSCZxds2CS56fSUF8MhmyTNsWETempS8LMBodsWL9DI1c/84IhxScP6JofZyK6EgTaHFvQg98ovKbQ5jKJXvdn1zUNHyY1aC0srGBGNWiTCCajHkQa7epjyzO1diC0/lp3v5Zyi9NqZNoeW9CjIqJQ5zpAfEnx6nHzI386bTWNfdu2js3Yff/53Bhs7Jvy79gLN9rNIbCXw298cuFQGHkcanbX7AIDO2n3MrO7hqvsKrrqv4Ltf/0EzF0EqsYdUYg/fP2Pw2aP0kfZBqMGhBT0SfHo8m8mMrWxlsLKVEc6hyWEod98BSVvDIRvc3c6iy7Zs2ARze5fwjsDPBrCwtHLs3VQ6h3ocJQNEbmd0XjqGq7WxYN72PduCq7UR7m6nAHHc3VM6h3ocFe1Jza+HpKsmq3cEjjR5qMB0DnU4Su4oK+dBPI70QcNzmPJ6alK55iiv0z6u6RzqcFT8PQ2S7mauv0Y8ymM4ZBNq2lEeRufQJof+1UudQzfdjm//AyhZguTtRH7EAAAAAElFTkSuQmCC) 0 0/272px 60px no-repeat;
+  image-rendering:pixelated;image-rendering:crisp-edges;image-rendering:pixelated;animation:bt-wig .48s steps(4) infinite,bt-bob 1.1s ease-in-out infinite alternate}
+@keyframes bt-wig{to{background-position:-272px 0}}
+@keyframes bt-bob{from{transform:translateY(-3px) rotate(-2deg)}to{transform:translateY(3px) rotate(2deg)}}
+#boot .bt-bub{position:absolute;left:62px;top:22px;width:4px;height:4px;border:2px solid #fff;opacity:0;animation:bt-bub 1.6s steps(8) infinite}
+#boot .bt-bub.b2{left:70px;width:2px;height:2px;animation-delay:.8s}
+@keyframes bt-bub{0%{opacity:0;transform:translate(0,0)}15%{opacity:.95}100%{opacity:0;transform:translate(6px,-34px)}}
+#boot .bt-txt{margin-top:16px;font-size:13px;color:#173a63;letter-spacing:.12em}
+#boot .bt-txt i{display:inline-block;width:0;overflow:hidden;vertical-align:bottom;font-style:normal;animation:bt-dots 1.2s steps(4) infinite}
+@keyframes bt-dots{to{width:2.1em}}
+@media (prefers-reduced-motion:reduce){#boot .bt-fish{animation:bt-wig .96s steps(4) infinite}#boot .bt-bub{display:none}}
+</style>
+<div id="boot" role="progressbar" aria-label="Loading Zoo Mash" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+  <i class="bt-cl" style="left:12%;top:14%"></i><i class="bt-cl" style="left:70%;top:9%;transform:scale(.75)"></i><i class="bt-cl" style="left:58%;top:82%;transform:scale(.6);opacity:.6"></i>
+  <div class="bt-in">
+    <div class="bt-title">ZOO<span>MASH</span></div>
+    <div class="bt-track"><div id="bt-fish"><b class="bt-fish"></b><i class="bt-bub"></i><i class="bt-bub b2"></i></div><div class="bt-bar"><i id="bt-fill"></i></div></div>
+    <div class="bt-txt">LOADING<i>...</i></div>
+  </div>
+</div>
+<script>
+/* v7.5 ZMBoot: waits for every title image (decoded), the Pix fonts and ui.js's own "screen fully drawn" promise, then fades into the
+   title (min 0.4 s on screen, 8 s safety timeout). Other biomes' assets are warmed afterwards at low priority. */
+window.ZMBoot = (function () {
+  var T0 = performance.now(), MIN = 400, MAX = 8000, el = document.getElementById('boot'), fill = document.getElementById('bt-fill'), fish = document.getElementById('bt-fish');
+  var S = { done: false, hidden: false, timedOut: false, progress: 0, shownMs: 0, log: [], t0: T0, items: 0, loaded: 0 }, keep = [], resolveReady;
+  S.ready = new Promise(function (r) { resolveReady = r; });
+  var MUST = ['img/title-bg.jpg?v=fd4', 'img/title-penguin-plate.png', 'img/title-penguin-v6.png?v=fd6', 'img/title-bear-sleep-v7.png?v=fd7s', 'img/title-monkey-v6.png?v=fd7', 'img/title-cat-v71.png?v=fd73'];
+  var TOTAL = MUST.length + 2;                                           // + fonts + "screen drawn"
+  function step(what) { S.loaded++; S.log.push({ what: what, t: Math.round(performance.now() - T0) }); setP(S.loaded / TOTAL); }
+  function setP(p) {
+    p = Math.max(S.progress, Math.min(1, p)); S.progress = p;
+    fill.style.width = (p * 100).toFixed(1) + '%'; el.setAttribute('aria-valuenow', Math.round(p * 100));
+    var w = fish.parentNode.clientWidth || 290; fish.style.transform = 'translateX(' + Math.round(p * (w - 68) / 2) * 2 + 'px)';
+  }
+  function loadImg(u, low) {
+    return new Promise(function (res) {
+      var im = new Image(); keep.push(im); if (low && 'fetchPriority' in im) im.fetchPriority = 'low';
+      im.onload = function () { if (im.decode) im.decode().then(res, res); else res(); }; im.onerror = res; im.src = u;
+    });
+  }
+  setP(0.04);
+  var imgs = Promise.all(MUST.map(function (u) { return loadImg(u).then(function () { step(u); }); }));
+  var dom = new Promise(function (r) { if (document.readyState !== 'loading') r(); else document.addEventListener('DOMContentLoaded', r); });
+  var fonts = dom.then(function () {
+    if (!document.fonts || !document.fonts.load) return;
+    return Promise.all([document.fonts.load('400 20px Pix'), document.fonts.load('700 20px Pix')]).then(function () { return document.fonts.ready; }).catch(function () {});
+  }).then(function () { step('fonts'); });
+  var screen = Promise.all([imgs, fonts]).then(function () {                // ui.js: the routed screen is built and drawn (title canvas, map islands, game art)
+    return new Promise(function (r) { (function w() { if (window.ZMUI && window.ZMUI.bootReady) window.ZMUI.bootReady.then(r, r); else setTimeout(w, 30); })(); });
+  }).then(function () { return new Promise(function (r) { requestAnimationFrame(function () { requestAnimationFrame(r); }); }); }).then(function () { step('screen'); });
+  var timeout = new Promise(function (r) { setTimeout(function () { S.timedOut = !S.done; r(); }, MAX); });
+  Promise.race([screen, timeout]).then(function () {
+    var wait = Math.max(MIN + 20 - (performance.now() - T0), 260);           // let the fish reach the end of the bar
+    setP(1);
+    setTimeout(function () {
+      S.done = true; S.shownMs = Math.round(performance.now() - T0); el.classList.add('out'); document.documentElement.classList.add('zm-booted');
+      resolveReady(S); warm();
+      setTimeout(function () { S.hidden = true; el.style.display = 'none'; }, 380);
+    }, wait);
+  });
+  // low-priority warm-up of everything else (map, Forest game, other biomes' backdrops, HUD textures and animal art), 2 at a time
+  function warm() {
+    var D = window.ZM_DATA || [], th = function (k) { return k === 'dinosaurs' ? 'jurassic' : k; }, q = [];
+    D.forEach(function (b) { var k = th(b.key); q.push('img/island-' + k + '.png', k === 'forest' ? 'img/island-forest-raccoon.png' : 'img/island-' + k + '-animal.png', 'img/sign-' + b.key + '.png'); });
+    q.push('img/island-locked.png', 'img/island-locked-nolock.png', 'img/padlock-v72.png', 'forest-bg.jpg', 'ui-themes/tex/forest.png');
+    ['ladybug', 'mouse', 'frog', 'squirrel', 'owl', 'raccoon', 'fox', 'deer', 'wolf', 'moose', 'bear'].forEach(function (n, i) { q.push('sprites/' + (i < 9 ? '0' : '') + (i + 1) + '-' + n + '.png?v=hd1'); });
+    D.forEach(function (b, i) { if (!i) return; var k = th(b.key); q.push('bg/' + k + '.png' + (k === 'space' ? '?v=fd7' : ''), 'ui-themes/tex/' + k + '.png'); });
+    D.forEach(function (b, i) { if (!i) return; for (var t = 1; t <= 11; t++) q.push('art/' + b.key + '/' + (t < 10 ? '0' : '') + t + '.png'); });
+    S.warmTotal = q.length; S.warmed = 0;
+    function next() { var u = q.shift(); if (!u) return; loadImg(u, true).then(function () { S.warmed++; next(); }); }
+    next(); next();
+  }
+  return S;
+})();
+</script>
+
+<!-- the game CSS loads after the loader so the loader paints first -->
+<link rel="stylesheet" href="style.css?v=v75c">
+<link rel="stylesheet" href="ui.css?v=v75c">
+<link rel="stylesheet" href="ui-themes/themes.css?v=v75c">
 <div id="scr-title" class="screen" data-screen="title">
   <canvas id="title-cv" class="fullcv"></canvas>
   <nav id="title-menu">
@@ -142,11 +237,11 @@
 <div id="toast" class="hidden"></div>
 <div id="rotate">Turn your phone upright to play</div>
 <script src="matter.min.js"></script>
-<script src="data.js?v=v74a"></script>
-<script src="art.js?v=v74a"></script>
-<script src="ambient.js?v=v74a"></script>
-<script src="vp.js?v=v74a"></script>
-<script src="game.js?v=v74a"></script>
-<script src="ui.js?v=v74a"></script>
+<script src="data.js?v=v75c"></script>
+<script src="art.js?v=v75c"></script>
+<script src="ambient.js?v=v75c"></script>
+<script src="vp.js?v=v75c"></script>
+<script src="game.js?v=v75c"></script>
+<script src="ui.js?v=v75c"></script>
 </body>
 </html>
